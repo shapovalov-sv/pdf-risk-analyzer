@@ -1,0 +1,2107 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Анализатор рисков PDF — v4</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;800&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --bg-card: #12121a;
+    --bg-hover: #1a1a25;
+    --border: #252535;
+    --text: #e8e8f0;
+    --text-dim: #8a8aa0;
+    --accent: #d4ff4a;
+    --danger: #ff4a6e;
+    --warning: #ffa84a;
+    --success: #4affb4;
+    --info: #4aa8ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'Manrope', sans-serif;
+    min-height: 100vh; padding: 40px 20px;
+    background-image:
+      radial-gradient(circle at 20% 10%, rgba(212, 255, 74, 0.06) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(255, 74, 110, 0.05) 0%, transparent 50%);
+  }
+  .container { max-width: 1180px; margin: 0 auto; }
+  header { margin-bottom: 40px; padding-bottom: 28px; border-bottom: 1px solid var(--border); }
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 3px; color: var(--accent);
+    text-transform: uppercase; margin-bottom: 14px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .eyebrow::before { content: ''; width: 8px; height: 8px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 12px var(--accent); }
+  h1 {
+    font-family: 'Unbounded', sans-serif; font-weight: 800;
+    font-size: clamp(30px, 5vw, 52px); line-height: 1;
+    letter-spacing: -0.02em; margin-bottom: 14px;
+  }
+  h1 .accent { color: var(--accent); font-style: italic; }
+  h1 .version {
+    font-size: 0.4em; color: var(--text-dim); font-weight: 400;
+    font-style: normal; vertical-align: middle; margin-left: 8px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .subtitle { color: var(--text-dim); font-size: 15px; max-width: 720px; line-height: 1.6; }
+  .privacy-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-top: 16px; padding: 6px 12px;
+    background: rgba(74, 255, 180, 0.08);
+    border: 1px solid rgba(74, 255, 180, 0.25);
+    border-radius: 100px; font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--success);
+  }
+  .upload-zone {
+    background: var(--bg-card); border: 2px dashed var(--border);
+    border-radius: 16px; padding: 44px 28px; text-align: center;
+    cursor: pointer; transition: all 0.2s ease; margin-bottom: 20px;
+  }
+  .upload-zone:hover, .upload-zone.drag-over { border-color: var(--accent); background: var(--bg-hover); }
+  .upload-zone.has-file { border-style: solid; border-color: var(--accent); }
+  .upload-icon { font-size: 38px; margin-bottom: 14px; display: block; }
+  .upload-text { font-size: 17px; font-weight: 500; margin-bottom: 6px; }
+  .upload-hint { color: var(--text-dim); font-size: 13px; font-family: 'JetBrains Mono', monospace; }
+  #fileInput { display: none; }
+
+  .file-list { margin-bottom: 20px; }
+  .file-list-item {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 14px; margin-bottom: 6px;
+  }
+  .file-list-item .file-icon-sm {
+    width: 32px; height: 32px; background: var(--accent); color: var(--bg);
+    border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; flex-shrink: 0;
+  }
+  .file-list-item .fl-name { flex: 1; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-list-item .fl-size { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); }
+  .file-status {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    padding: 3px 8px; border-radius: 100px; letter-spacing: 1px; text-transform: uppercase;
+    border: 1px solid var(--border); color: var(--text-dim);
+  }
+  .file-status.pending { color: var(--text-dim); border-color: var(--border); }
+  .file-status.analyzing { color: var(--info); border-color: rgba(74, 168, 255, 0.4); background: rgba(74, 168, 255, 0.08); }
+  .file-status.done { color: var(--success); border-color: rgba(74, 255, 180, 0.4); background: rgba(74, 255, 180, 0.08); }
+  .file-status.error { color: var(--danger); border-color: rgba(255, 74, 110, 0.4); background: rgba(255, 74, 110, 0.08); }
+  .file-delete { cursor: pointer; color: var(--text-dim); padding: 4px 8px; border-radius: 6px; font-size: 14px; }
+  .file-delete:hover { color: var(--danger); background: rgba(255, 74, 110, 0.08); }
+
+  .btn {
+    background: var(--accent); color: var(--bg); border: none;
+    padding: 13px 26px; font-family: 'Manrope', sans-serif; font-weight: 700;
+    font-size: 14px; border-radius: 10px; cursor: pointer;
+    transition: all 0.15s ease; letter-spacing: 0.02em;
+  }
+  .btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(212, 255, 74, 0.25); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-ghost {
+    background: transparent; color: var(--text-dim);
+    border: 1px solid var(--border); padding: 10px 16px;
+    font-size: 13px; font-weight: 500;
+  }
+  .btn-ghost:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); transform: none; box-shadow: none; }
+  .controls { display: flex; gap: 10px; margin-bottom: 32px; flex-wrap: wrap; }
+  .status {
+    background: var(--bg-card); border-left: 3px solid var(--info);
+    border-radius: 8px; padding: 14px 18px; margin-bottom: 20px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; display: none;
+  }
+  .status.show { display: block; }
+  .status.error { border-left-color: var(--danger); color: var(--danger); }
+  .loader {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    margin-right: 8px; vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .debug-panel {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px; margin-bottom: 20px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    display: none;
+  }
+  .debug-panel.show { display: block; }
+  .debug-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--border); }
+  .debug-row:last-child { border-bottom: none; }
+  .debug-label { color: var(--text-dim); }
+  .debug-value { color: var(--accent); }
+
+  .results { display: none; }
+  .results.show { display: block; animation: fadeIn 0.4s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  .batch-summary { margin-bottom: 28px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+  .batch-summary-head {
+    font-family: 'Unbounded', sans-serif; font-size: 16px; font-weight: 600;
+    margin-bottom: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .batch-summary-head .bs-counter {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text-dim); letter-spacing: 1px;
+  }
+  .bs-pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 100px; font-size: 10px; font-family: 'JetBrains Mono', monospace; margin-left: 4px; }
+  .bs-pill.high { background: rgba(255, 74, 110, 0.12); color: var(--danger); }
+  .bs-pill.medium { background: rgba(255, 168, 74, 0.12); color: var(--warning); }
+  .bs-pill.low { background: rgba(74, 255, 180, 0.12); color: var(--success); }
+  .batch-summary table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .batch-summary th {
+    text-align: left; padding: 10px 8px; font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px;
+    border-bottom: 1px solid var(--border); font-weight: 500;
+  }
+  .batch-summary td { padding: 12px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .summary-row { cursor: pointer; transition: background 0.15s; }
+  .summary-row:hover { background: var(--bg-hover); }
+  .summary-row.active { background: rgba(212, 255, 74, 0.05); }
+  .summary-row .sr-name { font-weight: 500; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .summary-row .sr-doctype { font-size: 11px; color: var(--text-dim); }
+  .summary-row .sr-top { font-size: 11px; color: var(--text-dim); }
+  .summary-row .sr-score { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+  .summary-detail-row td { background: var(--bg); padding: 0; border-bottom: 1px solid var(--border); }
+  .summary-detail-cell { padding: 18px 10px; }
+  .open-btn {
+    background: transparent; color: var(--accent); border: 1px solid var(--accent);
+    padding: 5px 12px; border-radius: 100px; font-size: 11px;
+    font-family: 'JetBrains Mono', monospace; cursor: pointer;
+  }
+  .open-btn:hover { background: rgba(212, 255, 74, 0.1); }
+
+  .summary-card {
+    background: linear-gradient(135deg, var(--bg-card), var(--bg-hover));
+    border: 1px solid var(--border); border-radius: 20px;
+    padding: 28px; margin-bottom: 24px; position: relative; overflow: hidden;
+  }
+  .summary-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--success), var(--warning), var(--danger));
+  }
+  .risk-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 14px; border-radius: 100px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    font-weight: 500; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 14px;
+  }
+  .risk-badge.low { background: rgba(74, 255, 180, 0.12); color: var(--success); border: 1px solid rgba(74, 255, 180, 0.3); }
+  .risk-badge.medium { background: rgba(255, 168, 74, 0.12); color: var(--warning); border: 1px solid rgba(255, 168, 74, 0.3); }
+  .risk-badge.high { background: rgba(255, 74, 110, 0.12); color: var(--danger); border: 1px solid rgba(255, 74, 110, 0.3); }
+  .summary-title { font-family: 'Unbounded', sans-serif; font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+  .summary-text { color: var(--text-dim); line-height: 1.7; font-size: 14px; }
+  .doc-type-tag {
+    display: inline-block; margin-top: 12px; padding: 5px 12px;
+    background: rgba(74, 168, 255, 0.1); border: 1px solid rgba(74, 168, 255, 0.3);
+    border-radius: 6px; font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--info);
+  }
+  .stats-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 12px; margin-top: 20px;
+  }
+  .stat { background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+  .stat-value { font-family: 'Unbounded', sans-serif; font-size: 22px; font-weight: 700; line-height: 1; margin-bottom: 6px; }
+  .stat-value.danger { color: var(--danger); }
+  .stat-value.warning { color: var(--warning); }
+  .stat-value.success { color: var(--success); }
+  .stat-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; }
+
+  .extracted-block {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 22px; margin-bottom: 24px;
+  }
+  .block-title {
+    font-family: 'Unbounded', sans-serif; font-size: 14px; font-weight: 600;
+    margin-bottom: 16px; letter-spacing: 0.02em;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .block-title-icon {
+    width: 24px; height: 24px; background: var(--accent); color: var(--bg);
+    border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+  }
+  .extracted-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+  .extracted-item { background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .extracted-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .extracted-value { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text); font-weight: 500; word-break: break-all; }
+  .extracted-value.amount { color: var(--warning); }
+  .extracted-value.code { color: var(--danger); }
+
+  .category {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 16px; margin-bottom: 12px; overflow: hidden;
+    transition: border-color 0.2s ease;
+  }
+  .category:hover { border-color: var(--text-dim); }
+  .category.risk-high { border-left: 3px solid var(--danger); }
+  .category.risk-medium { border-left: 3px solid var(--warning); }
+  .category.risk-low-conf { border-left: 3px solid var(--info); }
+  .category-header { padding: 16px 20px; display: flex; align-items: center; gap: 14px; cursor: pointer; user-select: none; }
+  .category-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .category-dot.found { background: var(--danger); box-shadow: 0 0 12px var(--danger); }
+  .category-dot.warn { background: var(--warning); box-shadow: 0 0 10px var(--warning); }
+  .category-dot.clean { background: var(--success); }
+  .category-title { flex: 1; font-weight: 600; font-size: 15px; }
+  .category-meta { display: flex; gap: 8px; align-items: center; }
+  .category-score { font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 3px 8px; background: rgba(0,0,0,0.3); border-radius: 100px; color: var(--text-dim); }
+  .category-score.high { color: var(--danger); background: rgba(255, 74, 110, 0.1); }
+  .category-score.med { color: var(--warning); background: rgba(255, 168, 74, 0.1); }
+  .chevron { color: var(--text-dim); font-size: 14px; transition: transform 0.2s ease; }
+  .category.expanded .chevron { transform: rotate(90deg); }
+  .category-body { padding: 0 20px 18px 20px; display: none; border-top: 1px solid var(--border); padding-top: 16px; }
+  .category.expanded .category-body { display: block; }
+  .empty-state { color: var(--text-dim); font-size: 13px; font-style: italic; }
+  .subgroup-title {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-dim);
+    margin: 12px 0 8px; padding-bottom: 6px; border-bottom: 1px dashed var(--border);
+  }
+  .subgroup-title:first-child { margin-top: 0; }
+  .match-item {
+    background: rgba(255, 74, 110, 0.05); border-left: 2px solid var(--danger);
+    border-radius: 6px; padding: 11px 13px; margin-bottom: 8px;
+    font-size: 13px; line-height: 1.5;
+  }
+  .match-item.confidence-medium { background: rgba(255, 168, 74, 0.05); border-left-color: var(--warning); }
+  .match-item.confidence-low { background: rgba(74, 168, 255, 0.05); border-left-color: var(--info); }
+  .match-item.negated { background: rgba(74, 255, 180, 0.05); border-left-color: var(--success); }
+  .match-item.historical { background: rgba(138, 138, 160, 0.05); border-left-color: var(--text-dim); }
+  .match-item.red-highlighted { box-shadow: inset 3px 0 0 gold; }
+  .match-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .match-keyword {
+    background: rgba(255, 74, 110, 0.15); color: var(--danger);
+    padding: 2px 8px; border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500;
+  }
+  .match-item.negated .match-keyword { background: rgba(74, 255, 180, 0.15); color: var(--success); }
+  .match-item.historical .match-keyword { background: rgba(138, 138, 160, 0.15); color: var(--text-dim); }
+  .match-item.confidence-medium .match-keyword { background: rgba(255, 168, 74, 0.15); color: var(--warning); }
+  .match-item.confidence-low .match-keyword { background: rgba(74, 168, 255, 0.15); color: var(--info); }
+  .match-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 1px;
+    color: var(--text-dim); padding: 2px 6px; border: 1px solid var(--border);
+    border-radius: 3px; text-transform: uppercase;
+  }
+  .match-label.neg { color: var(--success); border-color: rgba(74, 255, 180, 0.3); }
+  .match-label.hist { color: var(--text-dim); }
+  .match-label.high { color: var(--danger); border-color: rgba(255, 74, 110, 0.3); }
+  .match-label.med { color: var(--warning); border-color: rgba(255, 168, 74, 0.3); }
+  .match-label.red { color: #ffd700; border-color: rgba(255, 215, 0, 0.5); background: rgba(255, 215, 0, 0.05); }
+  .match-context { color: var(--text-dim); font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.7; }
+  .match-context mark { background: var(--danger); color: white; padding: 1px 4px; border-radius: 3px; font-weight: 500; }
+  .match-item.negated .match-context mark { background: var(--success); color: var(--bg); }
+  .match-item.historical .match-context mark { background: var(--text-dim); color: var(--bg); }
+  .match-item.confidence-medium .match-context mark { background: var(--warning); color: var(--bg); }
+  .match-item.confidence-low .match-context mark { background: var(--info); color: var(--bg); }
+
+  .page-link-btn {
+    display: inline-block; margin-left: 6px; padding: 2px 8px;
+    background: rgba(74, 168, 255, 0.1); color: var(--info);
+    border: 1px solid rgba(74, 168, 255, 0.3); border-radius: 100px;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    cursor: pointer; text-decoration: none;
+  }
+  .page-link-btn:hover { background: rgba(74, 168, 255, 0.2); }
+
+  .legend {
+    display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px;
+    padding: 14px 18px; background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: 10px; font-size: 12px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; color: var(--text-dim); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  .pdf-modal {
+    display: none; position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,0.85); backdrop-filter: blur(4px);
+    align-items: center; justify-content: center; padding: 40px;
+  }
+  .pdf-modal.show { display: flex; }
+  .pdf-modal-content {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 20px; max-width: 95vw; max-height: 95vh;
+    overflow: auto; position: relative;
+  }
+  .pdf-modal-close {
+    position: absolute; top: 10px; right: 14px; background: transparent;
+    color: var(--text); border: none; font-size: 22px; cursor: pointer;
+    width: 34px; height: 34px; border-radius: 50%;
+  }
+  .pdf-modal-close:hover { background: var(--bg-hover); }
+  .pdf-modal-title { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-dim); margin-bottom: 12px; }
+  .pdf-canvas-wrap { position: relative; display: inline-block; }
+  .bbox-highlight {
+    position: absolute; background: rgba(255, 230, 0, 0.35);
+    border: 2px solid gold; pointer-events: none;
+    border-radius: 2px;
+  }
+
+  .btn-danger {
+    background: rgba(255, 74, 110, 0.12); color: var(--danger);
+    border: 1px solid rgba(255, 74, 110, 0.45); padding: 10px 18px;
+    font-size: 13px; font-weight: 700;
+  }
+  .btn-danger:hover:not(:disabled) { background: rgba(255, 74, 110, 0.22); transform: none; box-shadow: none; }
+
+  .back-to-top {
+    position: fixed; bottom: 30px; right: 30px; z-index: 600;
+    background: var(--accent); color: var(--bg);
+    border: none; border-radius: 50%; width: 48px; height: 48px;
+    font-size: 22px; font-weight: 700; cursor: pointer;
+    display: none; align-items: center; justify-content: center;
+    box-shadow: 0 4px 18px rgba(212, 255, 74, 0.45);
+    transition: all 0.2s ease; line-height: 1;
+  }
+  .back-to-top.visible { display: flex; }
+  .back-to-top:hover { transform: translateY(-3px); box-shadow: 0 8px 28px rgba(212, 255, 74, 0.65); }
+
+  .ip-debt-block {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-left: 3px solid var(--warning);
+    border-radius: 16px; padding: 22px; margin-bottom: 24px;
+  }
+  .ip-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; }
+  .ip-table th { text-align: left; padding: 8px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--border); font-weight: 500; }
+  .ip-table td { padding: 10px 8px; border-bottom: 1px solid var(--border); font-family: 'JetBrains Mono', monospace; font-size: 12px; vertical-align: middle; }
+  .ip-table .amount-col { color: var(--warning); font-weight: 600; }
+  .ip-total { margin-top: 14px; padding: 12px 16px; background: rgba(255, 168, 74, 0.08); border: 1px solid rgba(255, 168, 74, 0.3); border-radius: 10px; display: flex; justify-content: space-between; align-items: center; }
+  .ip-total-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+  .ip-total-value { font-family: 'Unbounded', sans-serif; font-size: 20px; font-weight: 700; color: var(--warning); }
+
+  footer { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 12px; font-family: 'JetBrains Mono', monospace; text-align: center; line-height: 1.7; }
+  @media (max-width: 700px) {
+    body { padding: 24px 14px; }
+    .summary-card, .extracted-block { padding: 20px; }
+    .category-header { padding: 14px 16px; }
+    .category-body { padding: 16px; padding-top: 14px; }
+    .batch-summary table { font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <div class="eyebrow">OFFLINE ENGINE / V4 / BATCH + COLOR-AWARE</div>
+  <h1>Анализатор <span class="accent">рисков</span> PDF<span class="version">v4.0</span></h1>
+  <p class="subtitle">Пакетная обработка нескольких PDF, переход к найденному фрагменту страницы, учёт красного выделения, расширенные словари уголовных рисков.</p>
+  <div class="privacy-badge">🔒 Документы не покидают ваше устройство</div>
+</header>
+
+<div class="upload-zone" id="uploadZone">
+  <span class="upload-icon">📄</span>
+  <div class="upload-text">Перетащите PDF-файлы или кликните для выбора</div>
+  <div class="upload-hint">можно выбрать несколько .pdf одновременно</div>
+  <input type="file" id="fileInput" accept="application/pdf" multiple>
+</div>
+
+<div class="file-list" id="fileList"></div>
+
+<div class="controls">
+  <button class="btn" id="analyzeBtn" disabled>Запустить анализ</button>
+  <button class="btn btn-ghost" id="toggleDebugBtn" disabled>Диагностика</button>
+  <button class="btn btn-danger" id="resetBtn">✕ Сбросить всё</button>
+</div>
+
+<div class="debug-panel" id="debugPanel"></div>
+
+<div class="status" id="status"></div>
+
+<div class="results" id="results">
+  <div id="batchSummary"></div>
+  <div id="detailContainer"></div>
+</div>
+
+<div class="pdf-modal" id="pdfModal">
+  <div class="pdf-modal-content">
+    <button class="pdf-modal-close" id="pdfModalClose">×</button>
+    <div class="pdf-modal-title" id="pdfModalTitle">Страница</div>
+    <div class="pdf-canvas-wrap" id="pdfCanvasWrap">
+      <canvas id="pdfCanvas"></canvas>
+    </div>
+  </div>
+</div>
+
+<footer>
+  v4.0: пакетная обработка PDF, переход к фрагменту, учёт красного выделения, расширенный словарь уголовных терминов.<br>
+  Результаты справочные — требуется проверка юристом.
+</footer>
+
+</div>
+
+<button class="back-to-top" id="backToTopBtn" title="Наверх">↑</button>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ==========================================================================
+// ГРАНИЦЫ СЛОВА ДЛЯ КИРИЛЛИЦЫ
+// ==========================================================================
+const WB_START = '(?<![а-яёa-z0-9])';
+const WB_END = '(?![а-яёa-z])';
+
+function wb(pattern) { return WB_START + pattern; }
+function wbFull(base, endings) {
+  return WB_START + base + (endings ? '(' + endings + ')?' : '') + WB_END;
+}
+
+// ==========================================================================
+// СЛОВАРИ РИСКОВ
+// ==========================================================================
+const RISK_CATEGORIES = {
+  criminal: {
+    title: 'Судимость и уголовные дела',
+    rules: [
+      // === СУДИМОСТЬ ===
+      { pattern: wb('судим(ость|ости|остью|остей|остям|остями|остях)'), weight: 3, label: 'судимость' },
+      { pattern: wb('судим(ый|ого|ому|ым|ом|ая|ой|ую|ые|ых|ыми)?'), weight: 3, label: 'судим' },
+      { pattern: wb('несудим(ый|ого|ая|ой|а|о|ы)?'), weight: 1, label: 'несудим', historical: true },
+
+      // === ОСУЖДЕНИЕ / ПРИГОВОР ===
+      { pattern: wb('осужд(ён|ен|ена|ено|ены|ённого|енного|ённому|енному|ённым|енным|ённой|енной)'), weight: 3, label: 'осуждён' },
+      { pattern: wb('осужда(ет|ется|ются|лся|лась|лись|ли)'), weight: 3, label: 'осуждается' },
+      { pattern: wb('приговор(|а|у|ом|е|ы|ов|ам|ами|ах)'), weight: 3, label: 'приговор' },
+      { pattern: wb('приговор(ён|ен|ена|ено|ены|ила|или|ил)'), weight: 3, label: 'приговорён' },
+      { pattern: wb('вынесен\\s+приговор'), weight: 3, label: 'вынесен приговор' },
+      { pattern: wb('обвинительн(ый|ого|ом|ым)\\s+приговор'), weight: 3, label: 'обвинительный приговор' },
+      { pattern: wb('оправдательн(ый|ого|ом|ым)\\s+приговор'), weight: 1, label: 'оправдательный приговор', historical: true },
+
+      // === УГОЛОВНОЕ ПРЕСЛЕДОВАНИЕ ===
+      { pattern: wb('уголовн(ое|ого|ому|ым|ом)\\s+дел'), weight: 3, label: 'уголовное дело' },
+      { pattern: wb('уголовн(ое|ого|ому|ым|ом)\\s+преследовани'), weight: 3, label: 'уголовное преследование' },
+      { pattern: wb('уголовн(ое|ого|ому|ым|ом)\\s+наказани'), weight: 3, label: 'уголовное наказание' },
+      { pattern: wb('уголовн(ая|ой|ую|ою)\\s+ответственност'), weight: 3, label: 'уголовная ответственность' },
+      { pattern: wb('возбужден(о|ие|ия|ием)?\\s+уголовн'), weight: 3, label: 'возбуждение уголовного дела' },
+      { pattern: wb('прекращен(о|ие|ия)\\s+уголовн'), weight: 2, label: 'прекращение уголовного дела' },
+
+      // === СТАТЬИ УК ===
+      { pattern: 'ст(\\.|атья|атьи|атьей|атьям)\\s*\\d+(?:\\.\\d+)?(?:\\s*ч\\.?\\s*\\d+)?(?:\\s*п\\.?\\s*[а-я\\d]+)?\\s*ук(?![а-яё])', weight: 3, label: 'статья УК' },
+      { pattern: wb('ук\\s+рф'), weight: 2, label: 'УК РФ' },
+
+      // === НАКАЗАНИЕ ===
+      { pattern: wb('лишени(е|я|ем|ю)\\s+свободы'), weight: 3, label: 'лишение свободы' },
+      { pattern: wb('ограничени(е|я|ем|ю)\\s+свободы'), weight: 3, label: 'ограничение свободы' },
+      { pattern: wb('принудительн(ые|ых|ыми)\\s+работ'), weight: 3, label: 'принудительные работы' },
+      { pattern: wb('обязательн(ые|ых|ыми)\\s+работ'), weight: 2, label: 'обязательные работы' },
+      { pattern: wb('исправительн(ые|ых|ыми)\\s+работ'), weight: 3, label: 'исправительные работы' },
+      { pattern: wb('условн(ое|ого|ый|ым|ом)\\s+(осуждени|наказани|срок|лишени)'), weight: 3, label: 'условное осуждение' },
+      { pattern: wb('условно-досрочн(ое|ого|ое\\s+освобождени)'), weight: 2, label: 'условно-досрочное' },
+      { pattern: wb('условно\\s+досрочн'), weight: 2, label: 'условно-досрочное' },
+      { pattern: wb('испытательн(ый|ого|ым)\\s+срок'), weight: 2, label: 'испытательный срок' },
+      { pattern: wb('исправительн(ая|ой|ую)\\s+колони'), weight: 3, label: 'исправительная колония' },
+      { pattern: wb('колони(я|и|ю|ей)\\s+(общего|строгого|особого)\\s+режима'), weight: 3, label: 'колония режима' },
+      { pattern: wb('общего\\s+режима'), weight: 2, label: 'общий режим' },
+      { pattern: wb('строгого\\s+режима'), weight: 3, label: 'строгий режим' },
+      { pattern: wb('особого\\s+режима'), weight: 3, label: 'особый режим' },
+      { pattern: wb('отбыва(ет|л|ла|ли|ние|ния|нию|нием)\\s+наказани'), weight: 3, label: 'отбывает наказание' },
+      { pattern: wb('места(х)?\\s+лишения\\s+свободы'), weight: 3, label: 'места лишения свободы' },
+      { pattern: wb('сизо'), weight: 3, label: 'СИЗО' },
+      { pattern: wb('следственн(ый|ого|ом)\\s+изолятор'), weight: 3, label: 'следственный изолятор' },
+      { pattern: wb('учреждени(е|я|ем)\\s+(фсин|уфсин|увс)'), weight: 3, label: 'учреждение ФСИН' },
+      { pattern: wb('фсин'), weight: 2, label: 'ФСИН' },
+      { pattern: wb('ик[-\\s]?\\d+'), weight: 2, label: 'ИК (колония)' },
+
+      // === ПРОЦЕССУАЛЬНЫЕ РОЛИ ===
+      { pattern: wb('обвиняем(ый|ого|ому|ым|ом|ая|ой|ую|ые|ых|ыми)'), weight: 3, label: 'обвиняемый' },
+      { pattern: wb('подсудим(ый|ого|ому|ым|ом|ая|ой|ую|ые|ых|ыми)'), weight: 3, label: 'подсудимый' },
+      { pattern: wb('подозреваем(ый|ого|ому|ым|ом|ая|ой|ую|ые|ых|ыми)'), weight: 3, label: 'подозреваемый' },
+      { pattern: wb('обвинени(е|я|ю|ем|и)'), weight: 2, label: 'обвинение' },
+      { pattern: wb('предъявлен(о|ы)\\s+обвинени'), weight: 3, label: 'предъявлено обвинение' },
+
+      // === ПРЕСТУПЛЕНИЯ ===
+      { pattern: wb('преступлени(е|я|ю|ем|и|й|ям|ями|ях)'), weight: 2, label: 'преступление' },
+      { pattern: wb('совершил(|а|о|и)\\s+преступлени'), weight: 3, label: 'совершил преступление' },
+      { pattern: wb('совершени(е|и|я|ю|ем|ями|ях)\\s+преступлени'), weight: 3, label: 'совершение преступления' },
+      { pattern: wb('тяжк(ое|ого|ому|им|ом|их|ие)\\s+преступлени'), weight: 3, label: 'тяжкое преступление' },
+      { pattern: wb('особо\\s+тяжк'), weight: 3, label: 'особо тяжкое' },
+      { pattern: wb('рецидив(|а|у|ом|ы|ов|ист)'), weight: 3, label: 'рецидив' },
+      { pattern: wb('обвиня(ет|ется|ются|лся|лась|лись|ли)'), weight: 3, label: 'обвиняется' },
+      { pattern: wb('привлеч(ен|ён|ена|ено|ены|енного|ённого)\\s+к\\s+(уголовн|ответственност)'), weight: 3, label: 'привлечён к уг. отв.' },
+      { pattern: wb('привлекал(ся|ась|ись|ось)\\s+к\\s+уголовн'), weight: 3, label: 'привлекался к уг. отв.' },
+      { pattern: wb('виновн(ый|ого|ому|ым|ом|а|ой|ую)\\s+в\\s+совершени'), weight: 3, label: 'виновен в совершении' },
+      { pattern: wb('признан\\s+виновн'), weight: 3, label: 'признан виновным' },
+
+      // === КОНКРЕТНЫЕ ПРЕСТУПЛЕНИЯ ===
+      { pattern: wb('кража'), weight: 2, label: 'кража' },
+      { pattern: wb('хищени(е|я|ю|ем)'), weight: 2, label: 'хищение' },
+      { pattern: wb('мошенничеств(о|а|у|ом)'), weight: 2, label: 'мошенничество' },
+      { pattern: wb('грабёж|грабеж'), weight: 3, label: 'грабёж' },
+      { pattern: wb('разбой(|я|ю|ем)'), weight: 3, label: 'разбой' },
+      { pattern: wb('вымогательств'), weight: 3, label: 'вымогательство' },
+      { pattern: wb('убийств(о|а|у|ом)'), weight: 3, label: 'убийство' },
+      { pattern: wb('причинени(е|я)\\s+(тяжкого\\s+)?вреда\\s+здоровь'), weight: 3, label: 'причинение вреда здоровью' },
+      { pattern: wb('изнасиловани'), weight: 3, label: 'изнасилование' },
+      { pattern: wb('насильственн(ые|ых)\\s+действи'), weight: 3, label: 'насильственные действия' },
+      { pattern: wb('сбыт\\s+наркотик'), weight: 3, label: 'сбыт наркотиков' },
+      { pattern: wb('хранени(е|я)\\s+наркотик'), weight: 3, label: 'хранение наркотиков' },
+      { pattern: wb('взяточничеств|получение\\s+взятки|дача\\s+взятки'), weight: 3, label: 'взятка' },
+      { pattern: wb('коррупци'), weight: 2, label: 'коррупция' },
+
+      // === V4: РАСШИРЕННЫЕ КРИМИНАЛЬНЫЕ ТЕРМИНЫ (перед историческим) ===
+      { pattern: wbFull('вор', 'а|у|ом|е|ы|ов|ами|ах|овск(ой|ая|ого|ие|их)'), weight: 2, label: 'вор', skipWords: ['договор', 'воронеж', 'воронов', 'воробь', 'воронц', 'разговор', 'разговор'] },
+      { pattern: wbFull('мошенник', 'а|у|ом|е|и|ов|ами|ах'), weight: 3, label: 'мошенник' },
+      { pattern: wbFull('аферист', 'а|у|ом|ы|ов'), weight: 2, label: 'аферист' },
+      { pattern: wbFull('жулик', 'а|у|ом|и|ов'), weight: 2, label: 'жулик' },
+      { pattern: wbFull('бандит', 'а|у|ом|ы|ов|ами|ских'), weight: 3, label: 'бандит' },
+      { pattern: wbFull('преступник', 'а|у|ом|и|ов|ами|ах'), weight: 3, label: 'преступник' },
+      { pattern: wbFull('убийц', 'а|ы|е|у|ей|ам|ами|ах'), weight: 3, label: 'убийца' },
+      { pattern: wbFull('насильник', 'а|у|ом|и|ов'), weight: 3, label: 'насильник' },
+      { pattern: wb('наркоторгов(ец|ца|цу|цы|цев)'), weight: 3, label: 'наркоторговец' },
+      { pattern: wb('наркодилер'), weight: 3, label: 'наркодилер' },
+      { pattern: wb('наркоман(|а|у|ом|ы|ов|ии)'), weight: 2, label: 'наркоман' },
+      { pattern: wbFull('взяточник', 'а|у|ом|и|ов'), weight: 3, label: 'взяточник' },
+      { pattern: wbFull('коррупционер', 'а|у|ом|ы|ов'), weight: 3, label: 'коррупционер' },
+      { pattern: wbFull('контрабандист', 'а|у|ом|ы|ов'), weight: 3, label: 'контрабандист' },
+      { pattern: wb('преступн(ая|ое|ого|ому|ым|ом|ой|ую|ые|ых|ыми)\\s+(группа|группировк|сообществ|организаци|деятельност)'), weight: 3, label: 'преступная группа' },
+      { pattern: wbFull('опг'), weight: 3, label: 'ОПГ' },
+      { pattern: wbFull('опс'), weight: 3, label: 'ОПС' },
+      { pattern: wbFull('рейдер', 'а|у|ом|ы|ов|ск(ая|ое|ого|ие)'), weight: 2, label: 'рейдер' },
+      { pattern: wb('легализац(ия|ии|ией|ию)\\s+(доход|денежн|средств)'), weight: 3, label: 'легализация доходов' },
+      { pattern: wb('отмывани(е|я|ем|ю)\\s+(денег|доход|средств|преступн)'), weight: 3, label: 'отмывание денег' },
+      { pattern: wb('заказчик\\s+убийств'), weight: 3, label: 'заказчик убийств' },
+      { pattern: wb('наёмн(ый|ого|ому|ым|ом)\\s+убийц'), weight: 3, label: 'наёмный убийца' },
+      { pattern: wbFull('педофил', 'а|у|ом|ы|ов|ии'), weight: 3, label: 'педофил' },
+      { pattern: wbFull('маньяк', 'а|у|ом|и|ов'), weight: 3, label: 'маньяк' },
+      { pattern: wb('хулиганств(о|а|у|ом|е)'), weight: 2, label: 'хулиганство' },
+      { pattern: wb('браконьер(|а|у|ом|ы|ов|ск)'), weight: 2, label: 'браконьер' },
+
+      // === СМЯГЧЕНИЯ / ИСТОРИЧЕСКОЕ ===
+      { pattern: wb('(погашен|снят)(ая|ой|ы|ая\\s+судимост|ые\\s+судимост)'), weight: 1, label: 'погашенная/снятая судимость', historical: true },
+      { pattern: wb('амнисти(я|и|ей|ю|ями|ях)'), weight: 1, label: 'амнистия', historical: true },
+      { pattern: wb('помиловани(е|я|ю|ем)'), weight: 1, label: 'помилование', historical: true },
+      { pattern: wb('реабилитиров(ан|ана|аны)'), weight: 1, label: 'реабилитирован', historical: true }
+    ]
+  },
+  administrative: {
+    title: 'Административные правонарушения',
+    rules: [
+      { pattern: 'ст(\\.|атья|атьи)\\s*\\d+(?:\\.\\d+)?(?:\\s*ч\\.?\\s*\\d+)?\\s*коап(?![а-яё])', weight: 3, label: 'статья КоАП' },
+      { pattern: wb('коап\\s+рф'), weight: 2, label: 'КоАП РФ' },
+      { pattern: wb('административн(ое|ого|ому|ым|ом)\\s+правонарушени'), weight: 3, label: 'админ. правонарушение' },
+      { pattern: wb('административн(ый|ого|ому|ым|ом)\\s+штраф'), weight: 2, label: 'административный штраф' },
+      { pattern: wb('административн(ый|ого|ому|ым|ом)\\s+арест'), weight: 3, label: 'административный арест' },
+      { pattern: wb('лишени(е|я|ем)\\s+(специального\\s+)?права'), weight: 3, label: 'лишение прав' },
+      { pattern: wb('лишени(е|я|ем)\\s+водительск'), weight: 3, label: 'лишение водительских прав' },
+      { pattern: wb('состояни(е|и)\\s+(алкогольного|наркотического)\\s+опьянени'), weight: 3, label: 'состояние опьянения' },
+      { pattern: wb('(алкогольн|наркотическ)(ого|ом)\\s+опьянени'), weight: 3, label: 'опьянение' },
+      { pattern: wb('нетрезв(ом|ый|ого)\\s+(состоянии|виде)'), weight: 3, label: 'нетрезвое состояние' },
+      { pattern: wb('мелк(ое|ого|ому|ым|ом)\\s+(хулиганств|хищени)'), weight: 2, label: 'мелкое правонарушение' },
+      { pattern: wb('неуплат(а|ы|е|у)\\s+(административного\\s+)?штрафа'), weight: 2, label: 'неуплата штрафа' },
+      { pattern: wb('протокол\\s+об?\\s+административном'), weight: 3, label: 'протокол КоАП' },
+      { pattern: wb('привлекал(ся|ась|ись|ось)\\s+к\\s+административн'), weight: 3, label: 'привлечение к админ. отв.' },
+      { pattern: wb('привлечени(е|я|ем)\\s+к\\s+административн'), weight: 3, label: 'привлечение к админ. отв.' },
+      { pattern: wb('постановлени(е|я|ем)\\s+о\\s+(назначении\\s+)?административн'), weight: 3, label: 'постановление КоАП' }
+    ]
+  },
+  fssp: {
+    title: 'Задолженность ФССП / Исполнительное производство',
+    rules: [
+      { pattern: wb('фссп'), weight: 2, label: 'ФССП' },
+      { pattern: wb('федеральн(ая|ой|ую)\\s+служб(а|ы|у|е)\\s+судебн'), weight: 2, label: 'ФССП' },
+      { pattern: wb('судебн(ый|ого|ому|ым|ом|ыми)\\s+пристав'), weight: 2, label: 'судебный пристав' },
+      { pattern: wb('исполнительн(ое|ого|ому|ым|ом)\\s+производств'), weight: 3, label: 'исп. производство' },
+      { pattern: '\\d+/\\d+/\\d+[-–]?[иИ][пП]', weight: 3, label: 'номер ИП' },
+      { pattern: wb('исполнительн(ый|ого|ому|ым|ом)\\s+лист'), weight: 3, label: 'исполнительный лист' },
+      { pattern: wb('исполнительск(ий|ого|ому|им|ом)\\s+сбор'), weight: 2, label: 'исп. сбор' },
+      { pattern: wb('арест\\s+(имуществ|счет|счёт|банковск|денежн)'), weight: 3, label: 'арест имущества/счёта' },
+      { pattern: wb('обращени(е|я|ем)\\s+взыскани'), weight: 3, label: 'обращение взыскания' },
+      { pattern: wb('(ограничени|запрет)\\s+на?\\s+выезд'), weight: 3, label: 'запрет выезда' },
+      { pattern: wb('задолженност(ь|и|ью|ям|ями|ях)\\s+по\\s+алимент'), weight: 3, label: 'алиментная задолженность' },
+      { pattern: wb('алиментн(ая|ой|ую|ые|ых)'), weight: 2, label: 'алиментная' },
+      { pattern: wb('просроченн(ая|ой|ую)\\s+задолженност'), weight: 2, label: 'просроченная задолженность' },
+      { pattern: wb('взыскани(е|я|ем|ю)\\s+задолженност'), weight: 2, label: 'взыскание задолженности' },
+      { pattern: wb('взыскател(ь|я|ю|ем|и|ей|ям)'), weight: 1, label: 'взыскатель' },
+      { pattern: wb('должник(|а|у|ом|е|и|ов|ам|ами|ах)'), weight: 1, label: 'должник' }
+    ]
+  },
+  bankruptcy: {
+    title: 'Банкротство',
+    rules: [
+      { pattern: wb('призна(н|на|ны|ть)\\s+банкрот'), weight: 3, label: 'признан банкротом' },
+      { pattern: wb('дел(о|а|у|ом|е)\\s+о\\s+банкротств'), weight: 3, label: 'дело о банкротстве' },
+      { pattern: wb('процедур(а|ы|е|у|ой)\\s+банкротств'), weight: 3, label: 'процедура банкротства' },
+      { pattern: wb('конкурсн(ое|ого|ому|ым|ом)\\s+производств'), weight: 3, label: 'конкурсное производство' },
+      { pattern: wb('реализаци(я|и|ей|ю)\\s+имуществ'), weight: 2, label: 'реализация имущества' },
+      { pattern: wb('реструктуризаци(я|и|ей|ю)\\s+долг'), weight: 2, label: 'реструктуризация долга' },
+      { pattern: wb('(финансов|арбитражн)(ый|ого|ому|ым|ом)\\s+управляющ'), weight: 2, label: 'фин. управляющий' },
+      { pattern: wb('несостоятельн(ость|ости|ым|ой|ую)'), weight: 2, label: 'несостоятельность' },
+      { pattern: wb('неплатёжеспособ|неплатежеспособ'), weight: 2, label: 'неплатёжеспособность' },
+      { pattern: wb('внешн(ее|его|ему|им|ем)\\s+управлени'), weight: 2, label: 'внешнее управление' },
+      { pattern: wb('банкрот(|а|у|ом|ы|ов|ам|ами|ах|ств|ства|ству|ством|стве)'), weight: 2, label: 'банкрот' },
+      { pattern: wb('едрсб'), weight: 3, label: 'ЕДРСБ' },
+      { pattern: wb('федресурс'), weight: 2, label: 'Федресурс' }
+    ]
+  },
+  wanted: {
+    title: 'Розыск и меры пресечения',
+    rules: [
+      { pattern: wb('в\\s+розыск(|е|а|у)'), weight: 3, label: 'в розыске' },
+      { pattern: wb('объявлен(|а|ы|о)\\s+в\\s+розыск'), weight: 3, label: 'объявлен в розыск' },
+      { pattern: wb('(федеральн|международн)(ый|ого|ом|ым)\\s+розыск'), weight: 3, label: 'розыск' },
+      { pattern: wb('интерпол'), weight: 3, label: 'Интерпол' },
+      { pattern: wb('экстрадици(я|и|ей|ю)'), weight: 3, label: 'экстрадиция' },
+      { pattern: wb('подписк(а|и|у|ой)\\s+о\\s+невыезде'), weight: 3, label: 'подписка о невыезде' },
+      { pattern: wb('домашн(ий|его|ему|им|ем)\\s+арест'), weight: 3, label: 'домашний арест' },
+      { pattern: wb('запрет\\s+определённых\\s+действий'), weight: 2, label: 'запрет действий' },
+      { pattern: wb('скрывается\\s+от\\s+(следстви|суда)'), weight: 3, label: 'скрывается' },
+      { pattern: wb('мер(а|ы|ой)\\s+пресечени'), weight: 2, label: 'мера пресечения' },
+      { pattern: wb('заключени(е|я|ем)\\s+под\\s+стражу'), weight: 3, label: 'заключение под стражу' }
+    ]
+  },
+  extremism: {
+    title: 'Экстремизм, терроризм, санкции',
+    rules: [
+      { pattern: wb('экстремистск(ий|ого|ому|им|ом|ая|ой|ую|ие|их|ими)'), weight: 3, label: 'экстремистский' },
+      { pattern: wb('экстремизм(|а|у|ом|е)'), weight: 3, label: 'экстремизм' },
+      { pattern: wb('террористическ(ий|ого|ому|им|ом|ая|ой|ую|ие|их|ими)'), weight: 3, label: 'террористический' },
+      { pattern: wb('терроризм(|а|у|ом|е)'), weight: 3, label: 'терроризм' },
+      { pattern: wb('росфинмониторинг'), weight: 3, label: 'Росфинмониторинг' },
+      { pattern: wb('перечн(е|я|ю|ем)\\s+террористов'), weight: 3, label: 'перечень террористов' },
+      { pattern: wb('sdn\\s+list'), weight: 3, label: 'SDN List' },
+      { pattern: wb('ofac'), weight: 3, label: 'OFAC' },
+      { pattern: wb('санкционн(ый|ого|ому|ым|ом|ая|ой|ую|ые|ых)\\s+список'), weight: 3, label: 'санкционный список' },
+      { pattern: wb('иностранн(ый|ого|ому|ым|ом)\\s+агент'), weight: 2, label: 'иностранный агент' },
+      { pattern: wb('нежелательн(ая|ой|ую|ые|ых)\\s+организаци'), weight: 2, label: 'нежелательная орг.' },
+      { pattern: wb('запрещённ(ая|ой|ую)|запрещенн(ая|ой|ую)\\s+организаци'), weight: 2, label: 'запрещённая орг.' }
+    ]
+  },
+  credit: {
+    title: 'Кредитная история',
+    rules: [
+      { pattern: wb('плох(ая|ой|ую)\\s+кредитн(ая|ой|ую)\\s+истори'), weight: 3, label: 'плохая КИ' },
+      { pattern: wb('просрочк(а|и|у|ой|ах)\\s+по\\s+(кредит|займ|ипотек)'), weight: 3, label: 'просрочка по кредиту' },
+      { pattern: wb('невыплат(а|ы|у|ой)\\s+(кредит|займ)'), weight: 3, label: 'невыплата кредита' },
+      { pattern: wb('неуплат(а|ы|у|ой)\\s+(кредит|займ)'), weight: 3, label: 'неуплата кредита' },
+      { pattern: wb('коллекторск(ий|ого|ое|ая|ой|ую)'), weight: 2, label: 'коллекторы' },
+      { pattern: wb('коллектор(|а|у|ом|ы|ов|ами|ах)'), weight: 2, label: 'коллектор' },
+      { pattern: wb('безнадежн(ый|ого|ая)\\s+долг'), weight: 3, label: 'безнадёжный долг' },
+      { pattern: wb('списани(е|я|ем)\\s+долга'), weight: 2, label: 'списание долга' },
+      { pattern: wb('чёрн(ый|ого)\\s+список|черн(ый|ого)\\s+список'), weight: 1, label: 'чёрный список' },
+      { pattern: wb('микрозайм(|а|у|ов|ы|ами)'), weight: 1, label: 'микрозайм' }
+    ]
+  },
+  tax: {
+    title: 'Налоговые нарушения',
+    rules: [
+      { pattern: wb('налогов(ая|ой|ую|ою)\\s+задолженност'), weight: 3, label: 'налоговая задолженность' },
+      { pattern: wb('недоимк(а|и|у|ой|ах)'), weight: 3, label: 'недоимка' },
+      { pattern: wb('уклонени(е|я|ю|ем)\\s+от\\s+уплаты\\s+налог'), weight: 3, label: 'уклонение от налогов' },
+      { pattern: wb('неуплат(а|ы|у|ой)\\s+налог'), weight: 3, label: 'неуплата налогов' },
+      { pattern: wb('налогов(ое|ого|ому|ым|ом)\\s+правонарушени'), weight: 3, label: 'налоговое правонарушение' },
+      { pattern: wb('дисквалификаци(я|и|ей|ю)\\s+руководител'), weight: 3, label: 'дисквалификация' },
+      { pattern: wb('массов(ый|ого|ому|ым|ом)\\s+(руководител|учредител)'), weight: 2, label: 'массовый рук./учред.' },
+      { pattern: wb('фирм(а|ы|е|у|ой)\\W+однодневк'), weight: 3, label: 'фирма-однодневка' },
+      { pattern: wb('блокировк(а|и|у|ой)\\s+счёт|блокировк(а|и|у|ой)\\s+счет'), weight: 3, label: 'блокировка счёта' },
+      { pattern: wb('приостановлени(е|я|ем)\\s+операций'), weight: 2, label: 'приостановление операций' }
+    ]
+  },
+  court: {
+    title: 'Судебные разбирательства',
+    rules: [
+      { pattern: wb('исковы(е|х|ми|ми)\\s+требовани'), weight: 2, label: 'исковые требования' },
+      { pattern: wb('исково(е|го|му|м)\\s+заявлени'), weight: 2, label: 'исковое заявление' },
+      { pattern: wb('(подан|поданы|подано)\\s+иск'), weight: 2, label: 'подан иск' },
+      { pattern: wb('решени(е|я|ю|ем|и)\\s+суда'), weight: 1, label: 'решение суда' },
+      { pattern: wb('определени(е|я|ю|ем|и)\\s+суда'), weight: 1, label: 'определение суда' },
+      { pattern: wb('апелляци(я|и|ей|ю|онн)'), weight: 1, label: 'апелляция' },
+      { pattern: wb('кассаци(я|и|ей|онн)'), weight: 1, label: 'кассация' },
+      { pattern: wb('возмещени(е|я|ем)\\s+(ущерба|убытк)'), weight: 2, label: 'возмещение ущерба' },
+      { pattern: wb('компенсаци(я|и|ей|ю)\\s+морального\\s+вреда'), weight: 2, label: 'компенсация морального вреда' },
+      { pattern: wb('арбитражн(ое|ого|ому|ым|ом)\\s+дел'), weight: 2, label: 'арбитражное дело' }
+    ]
+  },
+  license: {
+    title: 'Лицензии и дисквалификация',
+    rules: [
+      { pattern: wb('(лишени|отзыв|аннулировани|приостановлени)\\s+лицензи'), weight: 3, label: 'отзыв лицензии' },
+      { pattern: wb('дисквалифициров(ан|ана|аны|анного|анной)'), weight: 3, label: 'дисквалифицирован' },
+      { pattern: wb('дисквалификаци(я|и|ей|ю|ей)'), weight: 2, label: 'дисквалификация' },
+      { pattern: wb('реестр\\s+дисквалифицированных'), weight: 3, label: 'реестр дисквалифицированных' },
+      { pattern: wb('запрет\\s+занимать\\s+должност'), weight: 3, label: 'запрет должностей' },
+      { pattern: wb('запрет\\s+заниматься\\s+деятельност'), weight: 3, label: 'запрет деятельности' }
+    ]
+  },
+  highlighted_red: {
+    title: 'Красный текст в PDF',
+    rules: []
+  }
+};
+
+// ==========================================================================
+// ОТРИЦАНИЯ
+// ==========================================================================
+const NEGATION_PATTERNS = [
+  'не\\s+имее(т|тся|м|шь)',
+  'не\\s+имел(|а|о|и)',
+  'отсутств(ует|уют|ие|ия|ием|уя)',
+  'не\\s+привлекал(ся|ась|ись|ось)',
+  'не\\s+судим(ый|а|ы)?',
+  'несудим',
+  'не\\s+состои(т|шь|м)',
+  'не\\s+состоял(|а|о|и)',
+  'не\\s+зарегистриров(ан|ана|ано|аны)',
+  'без\\s+судимост',
+  'без\\s+задолженност',
+  'нет\\s+сведений',
+  'не\\s+установлен(|а|о|ы)',
+  'не\\s+выявлен(|а|о|ы)',
+  'не\\s+обнаружен(|а|о|ы)',
+  'не\\s+находит(ся)?',
+  'не\\s+находил(ся|ась|ось|ись)',
+  'не\\s+числит(ся)?',
+  'справк(а|и|е|у)\\s+об\\s+отсутствии',
+  'сведения\\s+об\\s+отсутствии',
+  'подтвержда(ет|ют)\\s+отсутствие',
+  'не\\s+привлекалс',
+  'не\\s+является\\s+(должником|банкротом|обвиняемым)',
+  // v4
+  'освобожд(ён|ен)(|а|ы)\\s+от\\s+(наказани|ответственност)',
+  'прекращен(о|а|ы)\\s+в\\s+связи\\s+с',
+  'ист(ё|е)к\\s+срок\\s+давности',
+  'оправдан(|а|ы)\\s+судом?'
+];
+
+const CITATION_PATTERN = /(согласно\s+ст|в\s+соответствии\s+со?\s+ст|предусмотренн\w+\s+ст|ч\.\s*\d+\s+ст)/i;
+
+// ==========================================================================
+// ТИПЫ ДОКУМЕНТОВ
+// ==========================================================================
+const DOCUMENT_TYPES = [
+  { id: 'criminal_certificate', title: 'Справка о наличии (отсутствии) судимости', pattern: 'справк(а|и|у|е)\\s+о\\s+наличии\\s+\\(?\\s*отсутствии\\s*\\)?\\s+судимости' },
+  { id: 'criminal_certificate_2', title: 'Справка о судимости (МВД)', pattern: '(ик|иц|гиац|мвд).{0,100}судимост' },
+  { id: 'fssp_certificate', title: 'Документ ФССП / пристава', pattern: '(постановление|справк(а|и))\\s+.{0,50}(судебн|приставом|фссп)' },
+  { id: 'fssp_decision', title: 'Постановление об исп. производстве', pattern: 'постановлени[еяю]\\s+о\\s+возбуждении\\s+исполнительн' },
+  { id: 'tax_statement', title: 'Налоговая справка', pattern: 'справк(а|и)\\s+.{0,30}(состоянии?\\s+расч[её]тов|задолженности\\s+.{0,30}налог)' },
+  { id: 'credit_history', title: 'Кредитная история', pattern: '(кредитн(ая|ого)\\s+истори|бюро\\s+кредитных\\s+историй|нбки|объединенное\\s+кредитное\\s+бюро)' },
+  { id: 'bankruptcy_registry', title: 'Выписка реестра банкротств', pattern: '(единый\\s+федеральный\\s+реестр.{0,30}банкротств|федресурс|едрсб)' },
+  { id: 'egrul', title: 'Выписка ЕГРЮЛ/ЕГРИП', pattern: '(выписк(а|и)\\s+из\\s+егрюл|выписк(а|и)\\s+из\\s+егрип|единый\\s+государственный\\s+реестр)' },
+  { id: 'court_verdict', title: 'Приговор суда', pattern: '(именем\\s+российской\\s+федерации|приговор\\s+суда|приговорил|суд\\s+приговорил)' }
+];
+
+// ==========================================================================
+// ЭКСТРАКТОРЫ
+// ==========================================================================
+const EXTRACTORS = {
+  amounts: {
+    label: 'Денежные суммы',
+    pattern: /(\d{1,3}(?:[\s\u00a0]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s*(?:руб(?:ля|лей|\.)?|₽|rub)\b/gi,
+    format: (m) => m[0]
+  },
+  caseIP: {
+    label: 'Номера исп. производств',
+    pattern: /\b\d+\/\d+\/\d+[-–]?[иИ][пП]\b/gi,
+    format: (m) => m[0].toUpperCase()
+  },
+  caseCourt: {
+    label: 'Номера судебных дел',
+    pattern: /\b[АA]\d{2}[-–]\d+\/\d{4}\b|\b\d+[-–](?:К[АГСУ]|КАД|АД)\d*\/\d{4}\b|\bдел[оаеу]\s+№\s*[\w\-\/]+/gi,
+    format: (m) => m[0]
+  },
+  inn: {
+    label: 'ИНН',
+    pattern: /\b(?:инн[:\s]*)?(\d{10}|\d{12})\b/gi,
+    format: (m) => m[1] || m[0],
+    validate: (v) => /^\d{10}$|^\d{12}$/.test(v)
+  },
+  ogrn: {
+    label: 'ОГРН/ОГРНИП',
+    pattern: /\b(?:огрн(?:ип)?[:\s]*)?(\d{13}|\d{15})\b/gi,
+    format: (m) => m[1] || m[0],
+    validate: (v) => /^\d{13}$|^\d{15}$/.test(v)
+  },
+  articlesUK: {
+    label: 'Статьи УК РФ',
+    pattern: /\bст(?:\.|атья)\s*(\d+(?:\.\d+)?(?:\s*ч\.?\s*\d+)?(?:\s*п\.?\s*[а-я\d]+)?)\s*(?:ук|уголовного)/gi,
+    format: (m) => 'ст. ' + m[1] + ' УК'
+  },
+  articlesKoAP: {
+    label: 'Статьи КоАП',
+    pattern: /\bст(?:\.|атья)\s*(\d+(?:\.\d+)?(?:\s*ч\.?\s*\d+)?)\s*коап/gi,
+    format: (m) => 'ст. ' + m[1] + ' КоАП'
+  },
+  dates: {
+    label: 'Даты',
+    pattern: /\b(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})\b|\b(\d{1,2}\s+(?:январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)[а-я]*\s+\d{4})/gi,
+    format: (m) => m[0]
+  }
+};
+
+// ==========================================================================
+// СОСТОЯНИЕ — v4: batch
+// ==========================================================================
+let allAnalyses = [];
+let currentDetailIndex = -1;
+let debugVisible = false;
+
+// ==========================================================================
+// DOM
+// ==========================================================================
+const uploadZone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+const fileListEl = document.getElementById('fileList');
+const analyzeBtn = document.getElementById('analyzeBtn');
+const toggleDebugBtn = document.getElementById('toggleDebugBtn');
+const resetBtn = document.getElementById('resetBtn');
+const backToTopBtn = document.getElementById('backToTopBtn');
+const status = document.getElementById('status');
+const results = document.getElementById('results');
+const debugPanel = document.getElementById('debugPanel');
+const batchSummaryEl = document.getElementById('batchSummary');
+const detailContainer = document.getElementById('detailContainer');
+const pdfModal = document.getElementById('pdfModal');
+const pdfModalClose = document.getElementById('pdfModalClose');
+const pdfModalTitle = document.getElementById('pdfModalTitle');
+const pdfCanvas = document.getElementById('pdfCanvas');
+const pdfCanvasWrap = document.getElementById('pdfCanvasWrap');
+
+// ==========================================================================
+// UPLOAD
+// ==========================================================================
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag-over');
+  const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
+  if (files.length === 0) { showStatus('Поддерживаются только PDF файлы', true); return; }
+  addFiles(files);
+});
+fileInput.addEventListener('change', (e) => {
+  const files = Array.from(e.target.files);
+  if (files.length > 0) addFiles(files);
+});
+
+function addFiles(files) {
+  for (const file of files) {
+    allAnalyses.push({
+      file, name: file.name, size: file.size,
+      status: 'pending', analysis: null, rawText: null,
+      normalizedText: null, pageTexts: null, pagesCount: 0,
+      pdfDocPromise: null, error: null
+    });
+  }
+  renderFileList();
+  analyzeBtn.disabled = allAnalyses.length === 0;
+  uploadZone.classList.toggle('has-file', allAnalyses.length > 0);
+  hideStatus();
+}
+
+function renderFileList() {
+  fileListEl.innerHTML = '';
+  allAnalyses.forEach((entry, idx) => {
+    const div = document.createElement('div');
+    div.className = 'file-list-item';
+    div.innerHTML = `
+      <div class="file-icon-sm">PDF</div>
+      <div class="fl-name">${escapeHtml(entry.name)}</div>
+      <div class="fl-size">${formatBytes(entry.size)}</div>
+      <div class="file-status ${entry.status}">${statusLabel(entry.status)}</div>
+      <div class="file-delete" data-idx="${idx}" title="Удалить">✕</div>
+    `;
+    fileListEl.appendChild(div);
+  });
+  fileListEl.querySelectorAll('.file-delete').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const idx = parseInt(e.target.dataset.idx, 10);
+      allAnalyses.splice(idx, 1);
+      renderFileList();
+      analyzeBtn.disabled = allAnalyses.length === 0;
+      uploadZone.classList.toggle('has-file', allAnalyses.length > 0);
+    });
+  });
+}
+
+function statusLabel(s) {
+  switch (s) {
+    case 'pending': return 'ожидает';
+    case 'analyzing': return 'анализ…';
+    case 'done': return 'готово';
+    case 'error': return 'ошибка';
+    default: return s;
+  }
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
+function showStatus(text, isError = false, withLoader = false) {
+  status.className = 'status show' + (isError ? ' error' : '');
+  status.innerHTML = (withLoader ? '<span class="loader"></span>' : '') + text;
+}
+function hideStatus() { status.classList.remove('show'); }
+
+// ==========================================================================
+// RESET / EXPORT / DEBUG
+// ==========================================================================
+resetBtn.addEventListener('click', () => {
+  allAnalyses = [];
+  currentDetailIndex = -1;
+  fileInput.value = '';
+  renderFileList();
+  uploadZone.classList.remove('has-file');
+  analyzeBtn.disabled = true;
+  toggleDebugBtn.disabled = true;
+  results.classList.remove('show');
+  debugPanel.classList.remove('show');
+  batchSummaryEl.innerHTML = '';
+  detailContainer.innerHTML = '';
+  hideStatus();
+});
+
+toggleDebugBtn.addEventListener('click', () => {
+  debugVisible = !debugVisible;
+  debugPanel.classList.toggle('show', debugVisible);
+});
+
+function downloadFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+// ==========================================================================
+// ANALYZE BATCH
+// ==========================================================================
+analyzeBtn.addEventListener('click', async () => {
+  if (allAnalyses.length === 0) return;
+  analyzeBtn.disabled = true;
+  toggleDebugBtn.disabled = true;
+
+  for (let i = 0; i < allAnalyses.length; i++) {
+    const entry = allAnalyses[i];
+    if (entry.status === 'done') continue;
+    entry.status = 'analyzing';
+    renderFileList();
+    showStatus(`Обработка ${i + 1} / ${allAnalyses.length}: ${entry.name}…`, false, true);
+    try {
+      await analyzeEntry(entry);
+      entry.status = 'done';
+    } catch (err) {
+      console.error(err);
+      entry.status = 'error';
+      entry.error = err.message || String(err);
+    }
+    renderFileList();
+  }
+
+  hideStatus();
+  toggleDebugBtn.disabled = false;
+  analyzeBtn.disabled = false;
+
+  renderBatchSummary();
+  results.classList.add('show');
+  results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+// ==========================================================================
+// ИЗВЛЕЧЕНИЕ ФИО И ДАТЫ РОЖДЕНИЯ СУБЪЕКТА
+// ==========================================================================
+function extractSubjectInfo(rawText) {
+  if (!rawText) return null;
+  const sample = rawText.slice(0, 2500);
+  // Pattern: 2–4 Cyrillic words starting with capital letter (FIO)
+  const FIO_RE = '[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?(?:\\s+[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?){1,3}';
+  const fioMarkers = [
+    new RegExp('в\\s+отношении\\s+(' + FIO_RE + ')', ''),
+    new RegExp('гражданин(?:а|у|е|ки|ке|ку|кой)?\\s+(' + FIO_RE + ')', ''),
+    new RegExp('выдан[аоы]?\\s+(' + FIO_RE + ')', ''),
+    new RegExp('на\\s+имя\\s+(' + FIO_RE + ')', ''),
+    new RegExp('должник[а-яё]*:\\s*(' + FIO_RE + ')', ''),
+    new RegExp('фио\\s*[:\\-]\\s*(' + FIO_RE + ')', 'i'),
+    new RegExp('субъект[а-яё]*\\s+(' + FIO_RE + ')', ''),
+  ];
+  let fio = null;
+  for (const re of fioMarkers) {
+    const m = sample.match(re);
+    if (m && m[1]) {
+      const parts = m[1].trim().split(/\s+/);
+      if (parts.length >= 2 && parts.length <= 4) { fio = m[1].trim(); break; }
+    }
+  }
+  // DOB
+  const dobPatterns = [
+    /(?:дата|год)\s+рождения[:\s]+(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})/i,
+    /(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{4})\s+г(?:ода?)?\s+рождения/i,
+    /д\.?\s*р\.?\s*[:\s]+(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})/i,
+    /рожд[её]нн?[ыаое][йя]?\s+(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})/i,
+    /\b(\d{2}\.\d{2}\.\d{4})\s*(?:г\.?\s*р\.?|года?\s+рождения)/i
+  ];
+  let dob = null;
+  for (const re of dobPatterns) {
+    const m = sample.match(re);
+    if (m && m[1]) { dob = m[1].trim(); break; }
+  }
+  if (!fio && !dob) return null;
+  return { fio, dob };
+}
+
+// ==========================================================================
+// УНИКАЛЬНЫЕ ИСПОЛНИТЕЛЬНЫЕ ПРОИЗВОДСТВА + СУММА ЗАДОЛЖЕННОСТИ
+// ==========================================================================
+function extractIPDebt(normalizedText) {
+  const ipPattern = /\b(\d+\/\d+\/\d+[-–]?[иИ][пП])\b/gi;
+  const amtPattern = /(\d{1,3}(?:[\s\u00a0]\d{3})*(?:[.,]\d{1,2})?)\s*(?:руб(?:ля|лей|\.)?|₽)/gi;
+
+  // Collect all IP occurrences with positions
+  const allIPs = [];
+  let m;
+  while ((m = ipPattern.exec(normalizedText)) !== null) {
+    allIPs.push({ number: m[1].toUpperCase(), pos: m.index });
+  }
+  if (allIPs.length === 0) return null;
+
+  // Deduplicate, keeping first occurrence for each unique number
+  const seen = new Set();
+  const uniqueIPs = [];
+  for (const ip of allIPs) {
+    if (!seen.has(ip.number)) { seen.add(ip.number); uniqueIPs.push(ip); }
+  }
+
+  // For each unique IP, find the largest amount in ±400-char window
+  let totalSum = 0;
+  const ipWithAmounts = [];
+  for (const ip of uniqueIPs) {
+    const start = Math.max(0, ip.pos - 400);
+    const end = Math.min(normalizedText.length, ip.pos + 400);
+    const windowText = normalizedText.slice(start, end);
+    amtPattern.lastIndex = 0;
+    const amounts = [];
+    let am;
+    while ((am = amtPattern.exec(windowText)) !== null) {
+      const numStr = am[1].replace(/[\s\u00a0]/g, '').replace(',', '.');
+      const num = parseFloat(numStr);
+      if (!isNaN(num) && num > 0 && num < 1e11) amounts.push(num);
+    }
+    const maxAmt = amounts.length > 0 ? Math.max(...amounts) : null;
+    if (maxAmt !== null) totalSum += maxAmt;
+    ipWithAmounts.push({ number: ip.number, amount: maxAmt });
+  }
+
+  return { ips: ipWithAmounts, totalSum, count: uniqueIPs.length };
+}
+
+async function analyzeEntry(entry) {
+  const extraction = await extractTextFromPdf(entry.file, entry);
+  entry.pageTexts = extraction.pageTexts;
+  entry.pagesCount = extraction.pagesCount;
+  entry.rawText = extraction.fullText;
+
+  if (!entry.rawText.trim()) {
+    throw new Error('Не удалось извлечь текст (возможно, скан без OCR-слоя).');
+  }
+
+  // Normalize per page, concatenate; track page offsets in normalized space
+  let normalizedText = '';
+  for (let i = 0; i < entry.pageTexts.length; i++) {
+    const normPage = normalizeText(entry.pageTexts[i].text);
+    entry.pageTexts[i].normalizedText = normPage;
+    entry.pageTexts[i].normStart = normalizedText.length;
+    entry.pageTexts[i].normEnd = normalizedText.length + normPage.length;
+    normalizedText += normPage + '\n\n';
+  }
+  entry.normalizedText = normalizedText;
+
+  const analysis = analyzeText(normalizedText, entry.pagesCount, entry.pageTexts);
+  entry.analysis = analysis;
+
+  // Extract subject info (FIO + DOB) from raw text
+  entry.subjectInfo = extractSubjectInfo(entry.rawText || '');
+
+  // Extract unique IPs with debt amounts
+  entry.ipDebt = extractIPDebt(normalizedText);
+}
+
+// ==========================================================================
+// PDF EXTRACTION с цветом, позициями, offset-ами (v4)
+// ==========================================================================
+async function extractTextFromPdf(file, entry) {
+  const arrayBuffer = await file.arrayBuffer();
+  // Cache document promise for later modal rendering
+  const docBuf = arrayBuffer.slice(0);
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  if (entry) entry.pdfDocPromise = pdfjsLib.getDocument({ data: docBuf }).promise;
+
+  const pageTexts = [];
+  let fullText = '';
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+
+    // Collect fill colors from operator list in order of text-producing ops
+    let colorsInOrder = [];
+    try {
+      const opList = await page.getOperatorList();
+      const OPS = pdfjsLib.OPS || {};
+      let currentColor = null;
+      for (let k = 0; k < opList.fnArray.length; k++) {
+        const fn = opList.fnArray[k];
+        const args = opList.argsArray[k];
+        if (fn === OPS.setFillRGBColor && args && args.length >= 3) {
+          let r = args[0], g = args[1], b = args[2];
+          if (r > 1 || g > 1 || b > 1) { r /= 255; g /= 255; b /= 255; }
+          currentColor = { r, g, b };
+        } else if (fn === OPS.setFillGray && args && args.length >= 1) {
+          const v = args[0] > 1 ? args[0] / 255 : args[0];
+          currentColor = { r: v, g: v, b: v };
+        } else if (fn === OPS.setFillCMYKColor && args && args.length >= 4) {
+          const c = args[0], m = args[1], y = args[2], k2 = args[3];
+          const r = (1 - c) * (1 - k2);
+          const g = (1 - m) * (1 - k2);
+          const b = (1 - y) * (1 - k2);
+          currentColor = { r, g, b };
+        } else if (fn === OPS.showText || fn === OPS.showSpacedText) {
+          colorsInOrder.push(currentColor);
+        }
+      }
+    } catch (e) {
+      // operator list may be unavailable; fallback to no color info
+    }
+
+    let pageText = '';
+    let items = [];
+    let lastY = null;
+    let textOpIdx = 0;
+    const pageStartOffset = fullText.length;
+
+    for (const item of content.items) {
+      const y = item.transform ? item.transform[5] : null;
+      if (lastY !== null && y !== null && Math.abs(y - lastY) > 2) {
+        pageText += '\n';
+      }
+      const charStart = pageText.length;
+      pageText += item.str;
+      const charEnd = pageText.length;
+
+      let color = 'unknown';
+      if (item.str && item.str.length > 0) {
+        const c = colorsInOrder[textOpIdx];
+        textOpIdx++;
+        if (c) {
+          const isRed = c.r > 0.6 && c.g < 0.3 && c.b < 0.3;
+          if (isRed) color = 'red';
+          else if (c.r === 0 && c.g === 0 && c.b === 0) color = 'black';
+          else color = 'other';
+        }
+      }
+
+      if (!item.str.endsWith(' ')) pageText += ' ';
+
+      items.push({
+        str: item.str,
+        x: item.transform ? item.transform[4] : 0,
+        y: item.transform ? item.transform[5] : 0,
+        width: item.width || 0,
+        height: item.height || 0,
+        charStart, charEnd,
+        color,
+        transform: item.transform
+      });
+      lastY = y;
+    }
+
+    pageTexts.push({
+      pageNum: i,
+      text: pageText,
+      items,
+      startOffset: pageStartOffset,
+      endOffset: pageStartOffset + pageText.length
+    });
+
+    fullText += pageText + '\n\n';
+  }
+
+  return { pageTexts, fullText, pagesCount: pdf.numPages };
+}
+
+// ==========================================================================
+// НОРМАЛИЗАЦИЯ
+// ==========================================================================
+function normalizeText(text) {
+  let t = text;
+  t = t.replace(/([а-яёa-z])[-–]\s*\n\s*([а-яёa-z])/gi, '$1$2');
+  t = t.replace(/\n+/g, ' ');
+  t = t.replace(/[\s\u00a0]+/g, ' ');
+  t = t.replace(/([а-яё])([А-ЯЁ])/g, '$1 $2');
+  t = t.replace(/([а-яёa-z])(\d)/gi, '$1 $2');
+  t = t.replace(/(\d)([а-яёa-z])/gi, '$1 $2');
+  t = t.replace(/[`´'']/g, "'");
+  t = t.replace(/[""«»]/g, '"');
+  return t.trim();
+}
+
+// ==========================================================================
+// locateMatch — нормализованная позиция → страница + bbox в PDF-координатах
+// ==========================================================================
+function locateMatch(pageTexts, position, matchedText) {
+  if (!pageTexts || pageTexts.length === 0) return null;
+  let pageEntry = null;
+  for (const p of pageTexts) {
+    if (position >= p.normStart && position < p.normEnd) { pageEntry = p; break; }
+  }
+  if (!pageEntry) return null;
+
+  const rawLower = pageEntry.text.toLowerCase().replace(/ё/g, 'е');
+  const needle = matchedText.toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim();
+  let rawIdx = rawLower.indexOf(needle);
+  if (rawIdx === -1) {
+    const firstWord = needle.split(/\s+/)[0];
+    if (firstWord && firstWord.length >= 3) rawIdx = rawLower.indexOf(firstWord);
+  }
+  if (rawIdx === -1) return { pageNum: pageEntry.pageNum, bbox: null };
+
+  const rawEnd = rawIdx + needle.length;
+  const hits = pageEntry.items.filter(it => it.charStart < rawEnd && it.charEnd > rawIdx);
+  if (hits.length === 0) return { pageNum: pageEntry.pageNum, bbox: null };
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const it of hits) {
+    const h = it.height || 10;
+    const x1 = it.x, y1 = it.y - h, x2 = it.x + (it.width || 0), y2 = it.y;
+    if (x1 < minX) minX = x1;
+    if (y1 < minY) minY = y1;
+    if (x2 > maxX) maxX = x2;
+    if (y2 > maxY) maxY = y2;
+  }
+  if (!isFinite(minX)) return { pageNum: pageEntry.pageNum, bbox: null };
+  return {
+    pageNum: pageEntry.pageNum,
+    bbox: { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
+  };
+}
+
+// ==========================================================================
+// АНАЛИЗ
+// ==========================================================================
+function analyzeText(normalizedText, pagesCount, pageTexts) {
+  const textLower = normalizedText.toLowerCase();
+  const textForSearch = textLower.replace(/ё/g, 'е');
+
+  const docType = detectDocumentType(textForSearch);
+  const sentences = splitIntoSentences(normalizedText);
+
+  const categoriesResult = {};
+  let totalActive = 0, totalNegated = 0, totalHistorical = 0, totalScore = 0;
+
+  for (const [key, category] of Object.entries(RISK_CATEGORIES)) {
+    if (key === 'highlighted_red') continue;
+    const matches = findMatches(normalizedText, textForSearch, sentences, category.rules, pageTexts);
+    const active = matches.filter(m => !m.negated && !m.historical);
+    const negated = matches.filter(m => m.negated);
+    const historical = matches.filter(m => m.historical && !m.negated);
+    const rawScore = active.reduce((s, m) => s + (m.weight * m.confidenceMultiplier), 0);
+    const categoryScore = Math.round(rawScore * 10) / 10;
+
+    categoriesResult[key] = {
+      key, title: category.title,
+      matches, active: active.length,
+      negated: negated.length, historical: historical.length,
+      score: categoryScore
+    };
+
+    totalActive += active.length;
+    totalNegated += negated.length;
+    totalHistorical += historical.length;
+    totalScore += categoryScore;
+  }
+
+  const redMatches = buildRedMatches(pageTexts);
+  categoriesResult.highlighted_red = {
+    key: 'highlighted_red', title: RISK_CATEGORIES.highlighted_red.title,
+    matches: redMatches,
+    active: redMatches.length, negated: 0, historical: 0,
+    score: Math.round(redMatches.reduce((s, m) => s + m.weight * m.confidenceMultiplier, 0) * 10) / 10
+  };
+  totalActive += redMatches.length;
+  totalScore += categoriesResult.highlighted_red.score;
+
+  markRedOverlap(categoriesResult, redMatches);
+
+  const extracted = extractStructuredData(normalizedText);
+  const categoriesWithRisk = Object.values(categoriesResult).filter(c => c.active > 0 && c.score >= 2).length;
+  const riskLevel = computeRiskLevel(totalScore, categoriesWithRisk, docType);
+
+  return {
+    docType,
+    categories: categoriesResult,
+    extracted,
+    totalActive, totalNegated, totalHistorical,
+    totalScore: Math.round(totalScore * 10) / 10,
+    categoriesWithRisk,
+    ...riskLevel
+  };
+}
+
+function buildRedMatches(pageTexts) {
+  const out = [];
+  if (!pageTexts) return out;
+  for (const page of pageTexts) {
+    const redItems = page.items.filter(it => it.color === 'red' && it.str && it.str.trim().length > 0);
+    if (redItems.length === 0) continue;
+    // Group contiguous red items on same line (y within 3) with gap < 20
+    const groups = [];
+    let cur = null;
+    for (const it of redItems) {
+      if (cur && Math.abs(cur._lastY - it.y) < 3 && (it.x - cur._lastRight) < 20) {
+        cur.items.push(it);
+        cur._lastY = it.y;
+        cur._lastRight = it.x + (it.width || 0);
+      } else {
+        if (cur) groups.push(cur);
+        cur = { items: [it], _lastY: it.y, _lastRight: it.x + (it.width || 0) };
+      }
+    }
+    if (cur) groups.push(cur);
+
+    for (const g of groups) {
+      const groupText = g.items.map(x => x.str).join('').trim();
+      if (groupText.length < 4) continue;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const it of g.items) {
+        const h = it.height || 10;
+        const x1 = it.x, y1 = it.y - h, x2 = it.x + (it.width || 0), y2 = it.y;
+        if (x1 < minX) minX = x1;
+        if (y1 < minY) minY = y1;
+        if (x2 > maxX) maxX = x2;
+        if (y2 > maxY) maxY = y2;
+      }
+      const bbox = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+      const firstStart = g.items[0].charStart;
+      const lastEnd = g.items[g.items.length - 1].charEnd;
+      const ctxStart = Math.max(0, firstStart - 80);
+      const ctxEnd = Math.min(page.text.length, lastEnd + 80);
+      out.push({
+        keyword: 'красный текст',
+        matchedText: groupText,
+        contextBefore: page.text.slice(ctxStart, firstStart),
+        contextAfter: page.text.slice(lastEnd, ctxEnd),
+        position: (page.normStart || 0),
+        pageNum: page.pageNum,
+        bbox,
+        weight: 2,
+        confidenceLevel: 'high',
+        confidenceMultiplier: 1,
+        negated: false,
+        historical: false,
+        sentence: ''
+      });
+    }
+  }
+  return out;
+}
+
+function bboxIntersect(a, b) {
+  if (!a || !b) return false;
+  return !(a.x + a.width < b.x || b.x + b.width < a.x || a.y + a.height < b.y || b.y + b.height < a.y);
+}
+
+function markRedOverlap(categoriesResult, redMatches) {
+  if (!redMatches || redMatches.length === 0) return;
+  for (const [key, cat] of Object.entries(categoriesResult)) {
+    if (key === 'highlighted_red') continue;
+    for (const m of cat.matches) {
+      if (!m.bbox || !m.pageNum) continue;
+      const hit = redMatches.find(r => r.pageNum === m.pageNum && bboxIntersect(r.bbox, m.bbox));
+      if (hit) {
+        m.redHighlighted = true;
+        m.confidenceMultiplier = (m.confidenceMultiplier || 1) * 1.5;
+      }
+    }
+    const active = cat.matches.filter(m => !m.negated && !m.historical);
+    const rawScore = active.reduce((s, m) => s + (m.weight * m.confidenceMultiplier), 0);
+    cat.score = Math.round(rawScore * 10) / 10;
+  }
+}
+
+// ==========================================================================
+// ПОИСК СОВПАДЕНИЙ
+// ==========================================================================
+function findMatches(normalizedText, textForSearch, sentences, rules, pageTexts) {
+  const matches = [];
+
+  for (const rule of rules) {
+    const normalizedPattern = rule.pattern.replace(/ё/g, '[её]');
+    let regex;
+    try { regex = new RegExp(normalizedPattern, 'gi'); }
+    catch (e) { console.warn('Invalid pattern:', rule.pattern, e); continue; }
+
+    let m, iterations = 0;
+    const maxIterations = 10000;
+    while ((m = regex.exec(textForSearch)) !== null && iterations < maxIterations) {
+      iterations++;
+      if (m[0].length === 0) { regex.lastIndex++; continue; }
+
+      const idx = m.index;
+      const matchLen = m[0].length;
+      const matchedOriginal = normalizedText.slice(idx, idx + matchLen);
+
+      // Skip if the full word at match position is in the exclusion list
+      if (rule.skipWords && rule.skipWords.length > 0) {
+        const fullWord = getFullWordAt(normalizedText, idx, matchLen);
+        if (rule.skipWords.some(sw => fullWord.includes(sw))) continue;
+      }
+
+      const sentence = findContainingSentence(sentences, idx);
+
+      const contextStart = Math.max(0, idx - 100);
+      const contextEnd = Math.min(normalizedText.length, idx + matchLen + 100);
+      const contextBefore = normalizedText.slice(contextStart, idx);
+      const contextAfter = normalizedText.slice(idx + matchLen, contextEnd);
+
+      const negationResult = checkNegation(
+        sentence?.text || (contextBefore + matchedOriginal + contextAfter),
+        matchedOriginal,
+        idx - (sentence?.start || contextStart)
+      );
+
+      const historical = rule.historical === true;
+
+      let confidenceMultiplier = 1.0;
+      let confidenceLevel = 'high';
+      if (rule.weight === 1) { confidenceMultiplier = 0.5; confidenceLevel = 'low'; }
+      else if (rule.weight === 2) { confidenceLevel = 'medium'; }
+
+      const roleContext = checkRoleContext(sentence?.text || '', matchedOriginal);
+      if (roleContext) { confidenceMultiplier *= 0.3; confidenceLevel = 'low'; }
+
+      // v4: citation filter
+      const preWindow = normalizedText.slice(Math.max(0, idx - 50), idx);
+      if (CITATION_PATTERN.test(preWindow)) {
+        confidenceMultiplier *= 0.3;
+      }
+
+      const match = {
+        keyword: rule.label,
+        matchedText: matchedOriginal,
+        contextBefore, contextAfter,
+        position: idx,
+        weight: rule.weight,
+        confidenceMultiplier, confidenceLevel,
+        negated: negationResult.negated,
+        negationReason: negationResult.reason,
+        historical,
+        sentence: sentence?.text || ''
+      };
+
+      if (pageTexts) {
+        const loc = locateMatch(pageTexts, idx, matchedOriginal);
+        if (loc) {
+          match.pageNum = loc.pageNum;
+          match.bbox = loc.bbox;
+        }
+      }
+
+      matches.push(match);
+    }
+  }
+
+  return deduplicateMatches(matches);
+}
+
+function checkNegation(sentenceText, matchedText, matchPosInSent) {
+  if (!sentenceText) return { negated: false, reason: null };
+  const sentLower = sentenceText.toLowerCase().replace(/ё/g, 'е');
+  const matchLower = matchedText.toLowerCase().replace(/ё/g, 'е');
+  const matchIdx = sentLower.indexOf(matchLower);
+  if (matchIdx === -1) return { negated: false, reason: null };
+  const scope = sentLower.slice(0, matchIdx + matchLower.length + 20);
+  for (const negPattern of NEGATION_PATTERNS) {
+    const regex = new RegExp(negPattern, 'i');
+    const negMatch = regex.exec(scope);
+    if (negMatch) {
+      const between = scope.slice(negMatch.index + negMatch[0].length, matchIdx);
+      const wordsBetween = (between.match(/\S+/g) || []).length;
+      if (wordsBetween <= 12) {
+        return { negated: true, reason: negMatch[0].trim() };
+      }
+    }
+  }
+  return { negated: false, reason: null };
+}
+
+function checkRoleContext(sentenceText, matchedText) {
+  if (!sentenceText) return false;
+  const low = sentenceText.toLowerCase().replace(/ё/g, 'е');
+  const matchLow = matchedText.toLowerCase().replace(/ё/g, 'е');
+  if (/^должник/i.test(matchLow) || /должник$/i.test(matchLow) || low.indexOf('должник') === -1) {
+    if (/должник/.test(matchLow)) {
+      const markers = [
+        /\bименуем(ый|ая)\s+в\s+дальнейшем/i,
+        /\bсторон[аы]\s+договора/i,
+        /\bдоговор(а|у|ом)\s+(займ|кредит|поставк|купли)/i,
+        /\bкредитор/i
+      ];
+      if (markers.some(p => p.test(low))) return true;
+    }
+  }
+  return false;
+}
+
+function getFullWordAt(text, start, len) {
+  let i = start;
+  while (i > 0 && /[а-яёa-zA-Z0-9]/i.test(text[i - 1])) i--;
+  let j = start + len;
+  while (j < text.length && /[а-яёa-zA-Z0-9]/i.test(text[j])) j++;
+  return text.slice(i, j).toLowerCase().replace(/ё/g, 'е');
+}
+
+function deduplicateMatches(matches) {
+  matches.sort((a, b) => a.position - b.position);
+  const result = [];
+  for (const m of matches) {
+    const tooClose = result.find(r =>
+      Math.abs(r.position - m.position) < 15 && r.keyword === m.keyword
+    );
+    if (!tooClose) result.push(m);
+    else if (m.weight > tooClose.weight) {
+      const idx = result.indexOf(tooClose);
+      result[idx] = m;
+    }
+  }
+  return result;
+}
+
+function findContainingSentence(sentences, position) {
+  for (const s of sentences) {
+    if (position >= s.start && position < s.end) return s;
+  }
+  return null;
+}
+
+function splitIntoSentences(text) {
+  const abbrev = /\b(т\.\s*[едкнп]|г\.|ст\.|ч\.|п\.|руб\.|тыс\.|млн\.|млрд\.|др\.|ук|коап)\s*$/i;
+  const sentences = [];
+  let current = '';
+  let cursor = 0;
+  const chars = Array.from(text);
+  for (let i = 0; i < chars.length; i++) {
+    current += chars[i];
+    if (/[.!?;]/.test(chars[i])) {
+      if (!abbrev.test(current) && /\s|$/.test(chars[i + 1] || ' ')) {
+        sentences.push({ text: current.trim(), start: cursor, end: cursor + current.length });
+        cursor += current.length;
+        current = '';
+      }
+    }
+  }
+  if (current.trim()) {
+    sentences.push({ text: current.trim(), start: cursor, end: cursor + current.length });
+  }
+  return sentences;
+}
+
+function detectDocumentType(textLower) {
+  for (const docType of DOCUMENT_TYPES) {
+    try {
+      const re = new RegExp(docType.pattern, 'i');
+      if (re.test(textLower)) return docType;
+    } catch (e) { /* ignore */ }
+  }
+  return null;
+}
+
+function extractStructuredData(text) {
+  const result = {};
+  for (const [key, extractor] of Object.entries(EXTRACTORS)) {
+    const pattern = new RegExp(extractor.pattern.source, extractor.pattern.flags);
+    const seen = new Set();
+    const items = [];
+    let m;
+    while ((m = pattern.exec(text)) !== null) {
+      if (m[0].length === 0) { pattern.lastIndex++; continue; }
+      const value = extractor.format(m);
+      const normalizedValue = value.replace(/\s+/g, ' ').trim();
+      if (extractor.validate) {
+        const digits = (m[1] || m[0]).replace(/\D/g, '');
+        if (!extractor.validate(digits)) continue;
+      }
+      if (!seen.has(normalizedValue.toLowerCase())) {
+        seen.add(normalizedValue.toLowerCase());
+        items.push(normalizedValue);
+      }
+    }
+    if (items.length > 0) {
+      result[key] = { label: extractor.label, items: items.slice(0, 30) };
+    }
+  }
+  return result;
+}
+
+function computeRiskLevel(totalScore, categoriesWithRisk, docType) {
+  if (docType?.id === 'criminal_certificate' && categoriesWithRisk === 0) {
+    return { riskLevel: 'low', riskLabel: 'Низкий риск', riskMessage: 'Документ определён как справка о несудимости. Активных сигналов не обнаружено.' };
+  }
+  if (docType?.id === 'court_verdict') {
+    return { riskLevel: 'high', riskLabel: 'Высокий риск', riskMessage: 'Документ определён как приговор суда. Это прямое свидетельство уголовного преследования.' };
+  }
+  if (totalScore === 0) return { riskLevel: 'low', riskLabel: 'Низкий риск', riskMessage: 'Активных сигналов риска не обнаружено.' };
+  if (totalScore < 5 && categoriesWithRisk <= 1) return { riskLevel: 'low', riskLabel: 'Низкий риск', riskMessage: `Обнаружены единичные слабые сигналы (балл ${totalScore}).` };
+  if (totalScore < 15 && categoriesWithRisk <= 3) return { riskLevel: 'medium', riskLabel: 'Средний риск', riskMessage: `Выявлены умеренные сигналы в ${categoriesWithRisk} кат., балл ${totalScore}.` };
+  return { riskLevel: 'high', riskLabel: 'Высокий риск', riskMessage: `Выявлены существенные сигналы в ${categoriesWithRisk} кат., балл ${totalScore}.` };
+}
+
+// ==========================================================================
+// BATCH SUMMARY
+// ==========================================================================
+function renderBatchSummary() {
+  const done = allAnalyses.filter(e => e.status === 'done' && e.analysis);
+  const errored = allAnalyses.filter(e => e.status === 'error');
+  const high = done.filter(e => e.analysis.riskLevel === 'high').length;
+  const med = done.filter(e => e.analysis.riskLevel === 'medium').length;
+  const low = done.filter(e => e.analysis.riskLevel === 'low').length;
+
+  let html = `<div class="batch-summary">`;
+  html += `<div class="batch-summary-head">Результаты пакетного анализа
+    <span class="bs-counter">${allAnalyses.length} файл(ов)</span>
+    <span class="bs-pill high">${high} высокого</span>
+    <span class="bs-pill medium">${med} среднего</span>
+    <span class="bs-pill low">${low} низкого</span>
+    ${errored.length > 0 ? `<span class="bs-pill high">${errored.length} с ошибкой</span>` : ''}
+  </div>`;
+  html += `<table><thead><tr>
+    <th>№</th><th>Файл</th><th>Тип документа</th><th>Риск</th>
+    <th>Балл</th><th>Активн.</th><th>Отриц.</th><th>Топ-3 категории</th><th></th>
+  </tr></thead><tbody>`;
+
+  allAnalyses.forEach((entry, idx) => {
+    if (entry.status === 'error' || !entry.analysis) {
+      const errSubj = entry.subjectInfo;
+      const errTitle = errSubj && errSubj.fio ? escapeHtml(errSubj.fio) + (errSubj.dob ? ` <span style="color:var(--text-dim);font-size:11px;">${escapeHtml(errSubj.dob)}</span>` : '') : escapeHtml(entry.name);
+      html += `<tr class="summary-row" data-idx="${idx}">
+        <td>${idx + 1}</td>
+        <td class="sr-name">${errTitle}</td>
+        <td class="sr-doctype">—</td>
+        <td><span class="risk-badge high">● ошибка</span></td>
+        <td colspan="4" style="color:var(--danger); font-size:12px;">${escapeHtml(entry.error || 'ошибка анализа')}</td>
+        <td></td>
+      </tr>`;
+      html += `<tr class="summary-detail-row" id="detailRow-${idx}" style="display:none;"><td colspan="9"><div class="summary-detail-cell" id="detailCell-${idx}"></div></td></tr>`;
+      return;
+    }
+    const a = entry.analysis;
+    const top3 = Object.values(a.categories)
+      .filter(c => c.active > 0)
+      .sort((x, y) => y.score - x.score)
+      .slice(0, 3)
+      .map(c => c.title)
+      .join(' · ') || '—';
+
+    const subj = entry.subjectInfo;
+    let displayName, displaySub;
+    if (subj && subj.fio) {
+      displayName = escapeHtml(subj.fio);
+      displaySub = subj.dob ? `<br><span style="color:var(--text-dim);font-size:11px;font-family:'JetBrains Mono',monospace;">ДР: ${escapeHtml(subj.dob)}</span>` : '';
+    } else {
+      displayName = escapeHtml(entry.name);
+      displaySub = '';
+    }
+
+    html += `<tr class="summary-row" data-idx="${idx}">
+      <td>${idx + 1}</td>
+      <td class="sr-name" title="${escapeHtml(entry.name)}">${displayName}${displaySub}</td>
+      <td class="sr-doctype">${a.docType ? escapeHtml(a.docType.title) : '—'}</td>
+      <td><span class="risk-badge ${a.riskLevel}">● ${escapeHtml(a.riskLabel)}</span></td>
+      <td class="sr-score">${a.totalScore}</td>
+      <td>${a.totalActive}</td>
+      <td>${a.totalNegated}</td>
+      <td class="sr-top">${escapeHtml(top3)}</td>
+      <td><button class="open-btn">открыть ›</button></td>
+    </tr>
+    <tr class="summary-detail-row" id="detailRow-${idx}" style="display:none;">
+      <td colspan="9"><div class="summary-detail-cell" id="detailCell-${idx}"></div></td>
+    </tr>`;
+  });
+  html += `</tbody></table></div>`;
+  batchSummaryEl.innerHTML = html;
+
+  batchSummaryEl.querySelectorAll('.summary-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const idx = parseInt(row.dataset.idx, 10);
+      toggleDetail(idx);
+    });
+  });
+}
+
+function toggleDetail(idx) {
+  const row = document.getElementById(`detailRow-${idx}`);
+  const cell = document.getElementById(`detailCell-${idx}`);
+  const topRow = document.querySelector(`.summary-row[data-idx="${idx}"]`);
+  if (!row || !cell) return;
+  const isOpen = row.style.display !== 'none';
+
+  document.querySelectorAll('.summary-detail-row').forEach(r => r.style.display = 'none');
+  document.querySelectorAll('.summary-row').forEach(r => r.classList.remove('active'));
+
+  if (isOpen) {
+    currentDetailIndex = -1;
+    renderDebug();
+    return;
+  }
+
+  const entry = allAnalyses[idx];
+  if (!entry || !entry.analysis) return;
+  currentDetailIndex = idx;
+  row.style.display = '';
+  if (topRow) topRow.classList.add('active');
+  cell.innerHTML = renderDetailHtml(entry);
+  attachCategoryHandlers(cell, idx);
+  renderDebug();
+}
+
+function renderDetailHtml(entry) {
+  const a = entry.analysis;
+  let html = '';
+
+  // Title: FIO + DOB if available, else filename
+  const subj = entry.subjectInfo;
+  let titleHtml, subtitleHtml;
+  if (subj && subj.fio) {
+    titleHtml = escapeHtml(subj.fio);
+    subtitleHtml = subj.dob
+      ? `<div style="margin-top:4px;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--text-dim);">Дата рождения: ${escapeHtml(subj.dob)}</div>`
+      : '';
+    subtitleHtml += `<div style="margin-top:4px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);opacity:0.6;">${escapeHtml(entry.name)}</div>`;
+  } else {
+    titleHtml = escapeHtml(entry.name);
+    subtitleHtml = '';
+  }
+
+  html += `<div class="summary-card">
+    <div class="risk-badge ${a.riskLevel}">● ${escapeHtml(a.riskLabel)}</div>
+    <div class="summary-title">${titleHtml}</div>
+    ${subtitleHtml}
+    <div class="summary-text" style="margin-top:8px;">${escapeHtml(a.riskMessage)}</div>
+    ${a.docType ? `<div class="doc-type-tag">📋 ${escapeHtml(a.docType.title)}</div>` : ''}
+    <div class="stats-grid">
+      <div class="stat"><div class="stat-value danger">${a.totalScore}</div><div class="stat-label">Балл риска</div></div>
+      <div class="stat"><div class="stat-value">${a.categoriesWithRisk}</div><div class="stat-label">Категорий с риском</div></div>
+      <div class="stat"><div class="stat-value">${a.totalActive}</div><div class="stat-label">Активных совпадений</div></div>
+      <div class="stat"><div class="stat-value success">${a.totalNegated}</div><div class="stat-label">Отрицаний</div></div>
+      <div class="stat"><div class="stat-value warning">${a.totalHistorical}</div><div class="stat-label">Исторических</div></div>
+      <div class="stat"><div class="stat-value">${entry.pagesCount}</div><div class="stat-label">Страниц</div></div>
+    </div>
+  </div>`;
+
+  // IP debt block
+  if (entry.ipDebt && entry.ipDebt.count > 0) {
+    const ipd = entry.ipDebt;
+    const totalFmt = ipd.totalSum > 0
+      ? ipd.totalSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₽'
+      : '—';
+    html += `<div class="ip-debt-block">
+      <div class="block-title"><span class="block-title-icon">⚖</span>Исполнительные производства</div>
+      <table class="ip-table">
+        <thead><tr><th>№ ИП</th><th>Сумма задолженности</th></tr></thead>
+        <tbody>`;
+    for (const ip of ipd.ips) {
+      const amtFmt = ip.amount !== null
+        ? ip.amount.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₽'
+        : '—';
+      html += `<tr><td>${escapeHtml(ip.number)}</td><td class="amount-col">${amtFmt}</td></tr>`;
+    }
+    html += `</tbody></table>`;
+    if (ipd.totalSum > 0) {
+      html += `<div class="ip-total">
+        <span class="ip-total-label">Итого по уникальным ИП (${ipd.count})</span>
+        <span class="ip-total-value">${totalFmt}</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  html += `<div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background: var(--danger)"></div>Высокая</div>
+    <div class="legend-item"><div class="legend-dot" style="background: var(--warning)"></div>Средняя</div>
+    <div class="legend-item"><div class="legend-dot" style="background: var(--info)"></div>Низкая</div>
+    <div class="legend-item"><div class="legend-dot" style="background: var(--success)"></div>Отрицание</div>
+    <div class="legend-item"><div class="legend-dot" style="background: var(--text-dim)"></div>Историческое</div>
+    <div class="legend-item"><div class="legend-dot" style="background: gold"></div>Красный текст PDF</div>
+  </div>`;
+
+  html += `<div class="categories-list">`;
+  const sortedEntries = Object.entries(a.categories).sort((x, y) => y[1].score - x[1].score);
+  for (const [key, cat] of sortedEntries) {
+    const hasActive = cat.active > 0;
+    let riskClass = '';
+    if (cat.score >= 5) riskClass = 'risk-high';
+    else if (cat.score >= 2) riskClass = 'risk-medium';
+    else if (cat.active > 0) riskClass = 'risk-low-conf';
+
+    let dotClass = 'clean';
+    if (cat.score >= 5) dotClass = 'found';
+    else if (cat.score >= 2) dotClass = 'warn';
+    else if (cat.active > 0) dotClass = 'warn';
+
+    let scoreClass = '';
+    if (cat.score >= 5) scoreClass = 'high';
+    else if (cat.score >= 2) scoreClass = 'med';
+
+    const statusText = hasActive ? `${cat.active} активн.`
+      : cat.negated > 0 ? `${cat.negated} отриц.`
+      : cat.historical > 0 ? `${cat.historical} истор.` : 'чисто';
+
+    html += `<div class="category ${riskClass} ${hasActive ? 'expanded' : ''}" data-catkey="${escapeHtml(key)}">
+      <div class="category-header">
+        <div class="category-dot ${dotClass}"></div>
+        <div class="category-title">${escapeHtml(cat.title)}</div>
+        <div class="category-meta">
+          <div class="category-score ${scoreClass}">балл: ${cat.score}</div>
+          <div class="category-score">${statusText}</div>
+          <span class="chevron">›</span>
+        </div>
+      </div>
+      <div class="category-body">${renderCategoryBody(cat)}</div>
+    </div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function renderCategoryBody(cat) {
+  if (!cat.matches || cat.matches.length === 0) {
+    return '<div class="empty-state">Совпадений не обнаружено</div>';
+  }
+  const groups = {
+    active: cat.matches.filter(m => !m.negated && !m.historical).sort((a, b) => b.weight - a.weight),
+    historical: cat.matches.filter(m => m.historical && !m.negated),
+    negated: cat.matches.filter(m => m.negated)
+  };
+  let html = '';
+  if (groups.active.length > 0) {
+    html += `<div class="subgroup-title">⚠ Активные (${groups.active.length})</div>`;
+    groups.active.slice(0, 40).forEach(m => html += renderMatchHtml(m));
+    if (groups.active.length > 40) html += `<div class="empty-state" style="margin-top:8px;">…и ещё ${groups.active.length - 40} совпадений</div>`;
+  }
+  if (groups.historical.length > 0) {
+    html += `<div class="subgroup-title">◔ Историческое (${groups.historical.length})</div>`;
+    groups.historical.slice(0, 20).forEach(m => html += renderMatchHtml(m));
+  }
+  if (groups.negated.length > 0) {
+    html += `<div class="subgroup-title">✓ Отрицания (${groups.negated.length})</div>`;
+    groups.negated.slice(0, 20).forEach(m => html += renderMatchHtml(m));
+  }
+  return html;
+}
+
+function renderMatchHtml(match) {
+  let cls = 'match-item';
+  if (match.negated) cls += ' negated';
+  else if (match.historical) cls += ' historical';
+  else if (match.confidenceLevel === 'medium') cls += ' confidence-medium';
+  else if (match.confidenceLevel === 'low') cls += ' confidence-low';
+  if (match.redHighlighted) cls += ' red-highlighted';
+
+  let labels = '';
+  if (match.negated) labels += `<span class="match-label neg">отрицание: ${escapeHtml(match.negationReason || '')}</span>`;
+  else if (match.historical) labels += `<span class="match-label hist">историческое</span>`;
+  else {
+    const lc = match.confidenceLevel === 'high' ? 'high' : match.confidenceLevel === 'medium' ? 'med' : '';
+    labels += `<span class="match-label ${lc}">вес: ${match.weight}</span>`;
+  }
+  if (match.redHighlighted) labels += `<span class="match-label red">красный</span>`;
+
+  const bboxAttr = match.bbox ? JSON.stringify(match.bbox).replace(/"/g, '&quot;') : '';
+  const pageBtn = match.pageNum
+    ? `<a class="page-link-btn" data-page="${match.pageNum}" data-bbox="${bboxAttr}">стр. ${match.pageNum} →</a>`
+    : '';
+
+  const contextHtml = escapeHtml(match.contextBefore || '') +
+    `<mark>${escapeHtml(match.matchedText || '')}</mark>` +
+    escapeHtml(match.contextAfter || '');
+
+  return `<div class="${cls}">
+    <div class="match-meta">
+      <span class="match-keyword">${escapeHtml(match.keyword)}</span>
+      ${labels}
+      ${pageBtn}
+    </div>
+    <div class="match-context">…${contextHtml}…</div>
+  </div>`;
+}
+
+function attachCategoryHandlers(root, fileIdx) {
+  root.querySelectorAll('.category-header').forEach(h => {
+    h.addEventListener('click', () => h.parentElement.classList.toggle('expanded'));
+  });
+  root.querySelectorAll('.page-link-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const pageNum = parseInt(btn.dataset.page, 10);
+      let bbox = null;
+      try {
+        const raw = btn.getAttribute('data-bbox');
+        if (raw) bbox = JSON.parse(raw);
+      } catch (err) {}
+      openPdfAtPage(fileIdx, pageNum, bbox);
+    });
+  });
+}
+
+// ==========================================================================
+// PDF MODAL
+// ==========================================================================
+async function openPdfAtPage(fileIndex, pageNum, bbox) {
+  const entry = allAnalyses[fileIndex];
+  if (!entry) return;
+  try {
+    if (!entry.pdfDocPromise) {
+      const ab = await entry.file.arrayBuffer();
+      entry.pdfDocPromise = pdfjsLib.getDocument({ data: ab }).promise;
+    }
+    const pdf = await entry.pdfDocPromise;
+    const page = await pdf.getPage(pageNum);
+    const rawViewport = page.getViewport({ scale: 1 });
+    const maxW = Math.min(window.innerWidth - 80, 900);
+    const scale = maxW / rawViewport.width;
+    const viewport = page.getViewport({ scale });
+
+    pdfCanvas.width = viewport.width;
+    pdfCanvas.height = viewport.height;
+    const ctx = pdfCanvas.getContext('2d');
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    pdfCanvasWrap.querySelectorAll('.bbox-highlight').forEach(el => el.remove());
+
+    if (bbox && isFinite(bbox.x) && isFinite(bbox.y)) {
+      try {
+        const rect = viewport.convertToViewportRectangle([
+          bbox.x, bbox.y, bbox.x + bbox.width, bbox.y + bbox.height
+        ]);
+        const left = Math.min(rect[0], rect[2]);
+        const top = Math.min(rect[1], rect[3]);
+        const w = Math.abs(rect[2] - rect[0]);
+        const h = Math.abs(rect[3] - rect[1]);
+        const hi = document.createElement('div');
+        hi.className = 'bbox-highlight';
+        hi.style.left = (left - 3) + 'px';
+        hi.style.top = (top - 3) + 'px';
+        hi.style.width = (w + 6) + 'px';
+        hi.style.height = (h + 6) + 'px';
+        pdfCanvasWrap.appendChild(hi);
+      } catch (err) { console.warn('bbox overlay failed', err); }
+    }
+
+    pdfModalTitle.textContent = `${entry.name} · стр. ${pageNum} из ${pdf.numPages}`;
+    pdfModal.classList.add('show');
+  } catch (err) {
+    console.error(err);
+    alert('Не удалось открыть страницу: ' + err.message);
+  }
+}
+
+function closePdfModal() { pdfModal.classList.remove('show'); }
+pdfModalClose.addEventListener('click', closePdfModal);
+pdfModal.addEventListener('click', (e) => { if (e.target === pdfModal) closePdfModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && pdfModal.classList.contains('show')) closePdfModal(); });
+
+// ==========================================================================
+// DEBUG PANEL
+// ==========================================================================
+function renderDebug() {
+  if (currentDetailIndex < 0) {
+    debugPanel.innerHTML = '<div class="empty-state">Откройте файл из таблицы, чтобы увидеть диагностику.</div>';
+    return;
+  }
+  const entry = allAnalyses[currentDetailIndex];
+  if (!entry || !entry.analysis) { debugPanel.innerHTML = ''; return; }
+
+  const rawLen = (entry.rawText || '').length;
+  const normLen = (entry.normalizedText || '').length;
+  const sample = (entry.normalizedText || '').slice(0, 300);
+  const totalFiles = allAnalyses.length;
+  const done = allAnalyses.filter(e => e.analysis);
+  const avgScore = done.length > 0
+    ? Math.round((done.reduce((s, e) => s + e.analysis.totalScore, 0) / done.length) * 10) / 10
+    : 0;
+
+  const normalizedText = entry.normalizedText || '';
+  const simpleChecks = [
+    { word: 'судим', count: (normalizedText.toLowerCase().match(/судим/g) || []).length },
+    { word: 'осужд', count: (normalizedText.toLowerCase().match(/осужд/g) || []).length },
+    { word: 'приговор', count: (normalizedText.toLowerCase().match(/приговор/g) || []).length },
+    { word: 'уголовн', count: (normalizedText.toLowerCase().match(/уголовн/g) || []).length },
+    { word: 'обвин', count: (normalizedText.toLowerCase().match(/обвин/g) || []).length },
+    { word: 'наказани', count: (normalizedText.toLowerCase().match(/наказани/g) || []).length },
+    { word: 'лишени', count: (normalizedText.toLowerCase().match(/лишени/g) || []).length },
+    { word: 'колони', count: (normalizedText.toLowerCase().match(/колони/g) || []).length },
+    { word: 'ук рф', count: (normalizedText.toLowerCase().match(/ук\s+рф/g) || []).length }
+  ];
+
+  let html = `<div class="block-title" style="margin-bottom:12px;"><span class="block-title-icon">🔍</span>Диагностика</div>`;
+  html += `<div class="debug-row"><span class="debug-label">Файлов в пакете</span><span class="debug-value">${totalFiles}</span></div>`;
+  html += `<div class="debug-row"><span class="debug-label">Средний балл по пакету</span><span class="debug-value">${avgScore}</span></div>`;
+  html += `<div class="debug-row"><span class="debug-label">Текущий файл</span><span class="debug-value">${escapeHtml(entry.name)}</span></div>`;
+  html += `<div class="debug-row"><span class="debug-label">Страниц</span><span class="debug-value">${entry.pagesCount}</span></div>`;
+  html += `<div class="debug-row"><span class="debug-label">Длина сырого текста</span><span class="debug-value">${rawLen} симв.</span></div>`;
+  html += `<div class="debug-row"><span class="debug-label">Длина нормализованного</span><span class="debug-value">${normLen} симв.</span></div>`;
+  const totalRules = Object.values(RISK_CATEGORIES).reduce((s, c) => s + c.rules.length, 0);
+  html += `<div class="debug-row"><span class="debug-label">Правил загружено</span><span class="debug-value">${totalRules}</span></div>`;
+
+  let redCount = 0;
+  if (entry.pageTexts) {
+    for (const p of entry.pageTexts) {
+      redCount += p.items.filter(it => it.color === 'red').length;
+    }
+  }
+  html += `<div class="debug-row"><span class="debug-label">Фрагментов красного текста</span><span class="debug-value">${redCount}</span></div>`;
+
+  html += `<div style="margin-top:14px; padding-top:10px; border-top:1px dashed var(--border); color:var(--text-dim);">ПРОСТОЙ ПОИСК ПО КОРНЯМ:</div>`;
+  for (const chk of simpleChecks) {
+    const color = chk.count > 0 ? 'var(--danger)' : 'var(--text-dim)';
+    html += `<div class="debug-row"><span class="debug-label">"${chk.word}"</span><span class="debug-value" style="color:${color}">${chk.count}</span></div>`;
+  }
+
+  html += `<div style="margin-top:14px; padding-top:10px; border-top:1px dashed var(--border); color:var(--text-dim);">НАЧАЛО НОРМАЛИЗОВАННОГО ТЕКСТА:</div>`;
+  html += `<div style="margin-top:8px; padding:10px; background:rgba(0,0,0,0.4); border-radius:6px; color:var(--text); font-size:11px; line-height:1.6; white-space:pre-wrap;">${escapeHtml(sample)}…</div>`;
+
+  const criminalRoots = simpleChecks.filter(c => ['судим', 'осужд', 'приговор', 'уголовн'].includes(c.word));
+  const hasCriminalRoots = criminalRoots.some(c => c.count > 0);
+  const criminalCategory = entry.analysis.categories.criminal;
+  const criminalFoundActive = criminalCategory && criminalCategory.active > 0;
+
+  if (hasCriminalRoots && !criminalFoundActive) {
+    html += `<div style="margin-top:14px; padding:10px; background:rgba(255,74,110,0.1); border:1px solid var(--danger); border-radius:6px; color:var(--danger); font-size:12px;">⚠ ВНИМАНИЕ: в тексте найдены корни уголовных терминов, но паттерны их не распознали.</div>`;
+  }
+
+  debugPanel.innerHTML = html;
+}
+
+function escapeHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// ==========================================================================
+// КНОПКА «НАВЕРХ»
+// ==========================================================================
+window.addEventListener('scroll', () => {
+  backToTopBtn.classList.toggle('visible', window.scrollY > 450);
+});
+backToTopBtn.addEventListener('click', () => {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+</script>
+</body>
+</html>
