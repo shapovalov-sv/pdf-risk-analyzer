@@ -2306,7 +2306,7 @@ async function analyzeEntry(entry) {
   // ============================================================
   // V7: ИТОГОВЫЙ СКОРИНГ 0–100 С ГЕЙТИНГОМ И BREAKDOWN
   // ============================================================
-  const scoreResult = computeScoreV7(entry.analysis, entry.ipDebt, entry.himeraScore);
+  const scoreResult = computeScoreV7(entry.analysis, entry.ipDebt, entry.himeraScore, entry.microloans);
   entry.analysis.totalScore = scoreResult.totalScore;
   entry.analysis.riskLevel = scoreResult.riskLevel;
   entry.analysis.riskLabel = scoreResult.riskLabel;
@@ -3011,7 +3011,42 @@ const SCORE_CONFIG_V7 = {
     'исправительная колония', 'колония режима', 'строгий режим',
     'особый режим', 'общий режим', 'СИЗО', 'следственный изолятор'
   ],
-  currentProcessLabels: ['обвиняемый', 'подсудимый', 'подозреваемый']
+  currentProcessLabels: ['обвиняемый', 'подсудимый', 'подозреваемый'],
+
+  // v7.2: бонусы уголовки — наборы label'ов для насыщения компонента
+  convictionLabels: [   // подтверждённая судимость / осуждение → +12
+    'судим', 'судимость', 'осуждён', 'осуждается', 'приговор', 'приговорён',
+    'обвинительный приговор', 'вынесен приговор', 'признан виновным',
+    'виновен в совершении', 'привлечён к уг. отв.', 'привлекался к уг. отв.', 'рецидив'
+  ],
+  activeProcessLabels: [ // активный уголовный процесс → +8
+    'уголовное дело', 'уголовное преследование', 'возбуждение уголовного дела',
+    'обвиняемый', 'подсудимый', 'подозреваемый', 'предъявлено обвинение',
+    'обвинение', 'обвиняется', 'уголовная ответственность'
+  ],
+  heavyDeedLabels: [    // тяжкие деяния → +10
+    'грабёж', 'разбой', 'убийство', 'изнасилование', 'сбыт наркотиков',
+    'хранение наркотиков', 'вымогательство', 'причинение вреда здоровью',
+    'насильственные действия', 'бандит', 'ОПГ', 'ОПС', 'убийца', 'насильник',
+    'наркоторговец', 'наркодилер', 'педофил', 'маньяк', 'заказчик убийств',
+    'наёмный убийца', 'взятка', 'отмывание денег', 'легализация доходов',
+    'тяжкое преступление', 'особо тяжкое', 'совершил преступление',
+    'совершение преступления', 'кража', 'хищение', 'мошенничество'
+  ],
+  criminalTagLabels: [  // криминальные ярлыки/«Метки» → +5
+    'вор', 'мошенник', 'аферист', 'жулик', 'преступник', 'наркоман',
+    'коррупционер', 'контрабандист', 'рейдер', 'хулиганство', 'взяточник'
+  ],
+
+  // v7.2: микрозаймы как сигнал финансовой нагрузки
+  microloansCap: 10,
+
+  // v7.2: эскалация за совокупность драйверов риска.
+  // Драйвер засчитывается, если компонент достиг порога.
+  driverThresholds: {
+    criminal: 25, fssp: 10, bankruptcy: 5, wanted: 1,
+    extremism: 1, microloans: 5, tax: 3, credit: 5
+  }
 };
 
 // --------------------------------------------------------------------------
@@ -3133,28 +3168,40 @@ function computeCriminalComponent(analysis) {
     });
   }
 
-  // Бонусы за факты
+  // v7.2: бонусы за факты — насыщают компонент до потолка при тяжёлом профиле.
   let bonus = 0;
+  const hasLabel = (labels) => active.some(m =>
+    labels.some(lbl => m.keyword === lbl || m.keyword.includes(lbl))
+  );
 
   if (analysis.docType && analysis.docType.id === 'court_verdict') {
     bonus += 15;
     breakdown.push({ label: 'Документ — приговор суда', value: 15 });
   }
 
-  const hasImprisonment = active.some(m =>
-    SCORE_CONFIG_V7.imprisonmentLabels.some(lbl => m.keyword === lbl || m.keyword.includes(lbl))
-  );
-  if (hasImprisonment) {
+  if (hasLabel(SCORE_CONFIG_V7.convictionLabels)) {
+    bonus += 12;
+    breakdown.push({ label: 'Судимость / осуждение / признан виновным', value: 12 });
+  }
+
+  if (hasLabel(SCORE_CONFIG_V7.heavyDeedLabels)) {
+    bonus += 10;
+    breakdown.push({ label: 'Тяжкие деяния (грабёж/наркосбыт/насилие и т.п.)', value: 10 });
+  }
+
+  if (hasLabel(SCORE_CONFIG_V7.activeProcessLabels)) {
+    bonus += 8;
+    breakdown.push({ label: 'Активный уголовный процесс (дело/обвинение)', value: 8 });
+  }
+
+  if (hasLabel(SCORE_CONFIG_V7.imprisonmentLabels)) {
     bonus += 8;
     breakdown.push({ label: 'Лишение свободы / колония / отбывает наказание', value: 8 });
   }
 
-  const hasCurrentProcess = active.some(m =>
-    SCORE_CONFIG_V7.currentProcessLabels.some(lbl => m.keyword === lbl)
-  );
-  if (hasCurrentProcess) {
+  if (hasLabel(SCORE_CONFIG_V7.criminalTagLabels)) {
     bonus += 5;
-    breakdown.push({ label: 'Текущий процесс: обвиняемый/подсудимый', value: 5 });
+    breakdown.push({ label: 'Криминальные ярлыки (вор/мошенник/наркоман…)', value: 5 });
   }
 
   // Тяжкие статьи УК — ищем в extracted.articlesUK
@@ -3168,8 +3215,6 @@ function computeCriminalComponent(analysis) {
     breakdown.push({ label: 'Тяжкая статья УК (105/111/131/132/162/228.1)', value: 5 });
   }
 
-  bonus = Math.min(30, bonus);
-
   const total = Math.min(SCORE_CONFIG_V7.caps.criminal, dictScore + bonus);
   return { score: total, breakdown, dictScore, bonus };
 }
@@ -3181,9 +3226,9 @@ function computeFsspComponent(analysis, ipDebt) {
   const breakdown = [];
   let score = 0;
 
-  // 1) Базовый компонент — активные ИП
+  // 1) Базовый компонент — активные ИП (v7.2: до 15 баллов, ~2 за ИП)
   if (ipDebt && ipDebt.activeCount > 0) {
-    const ipScore = Math.min(12, 3 * ipDebt.activeCount);
+    const ipScore = Math.min(15, 2 * ipDebt.activeCount);
     score += ipScore;
     breakdown.push({
       label: `Активных ИП: ${ipDebt.activeCount}`,
@@ -3267,6 +3312,24 @@ function computeHimeraComponent(himeraScore) {
 }
 
 // --------------------------------------------------------------------------
+// v7.2: Компонент микрозаймов — финансовая нагрузка (число заявок в МФО)
+// --------------------------------------------------------------------------
+function computeMicroloansComponent(microloans) {
+  if (!microloans || microloans.count === 0) return { score: 0, breakdown: [] };
+  const n = microloans.count;
+  let score;
+  if (n >= 10)     score = 10;
+  else if (n >= 5) score = 7;
+  else if (n >= 3) score = 5;
+  else             score = 3;
+  score = Math.min(SCORE_CONFIG_V7.microloansCap, score);
+  return {
+    score,
+    breakdown: [{ label: `Микрозаймы: ${n} заявок (финансовая нагрузка)`, value: score }]
+  };
+}
+
+// --------------------------------------------------------------------------
 // Надбавки/штрафы за уверенность
 // --------------------------------------------------------------------------
 function computeConfidenceAdjustments(analysis, ipDebt, hasExplicitFacts) {
@@ -3320,7 +3383,7 @@ function computeConfidenceAdjustments(analysis, ipDebt, hasExplicitFacts) {
 // --------------------------------------------------------------------------
 // ГЛАВНАЯ ФУНКЦИЯ: считает итоговый балл и breakdown
 // --------------------------------------------------------------------------
-function computeScoreV7(analysis, ipDebt, himeraScore) {
+function computeScoreV7(analysis, ipDebt, himeraScore, microloans) {
   const facts = detectExplicitFacts(analysis, ipDebt, himeraScore);
   const hasExplicitFacts = facts.length > 0;
 
@@ -3350,6 +3413,12 @@ function computeScoreV7(analysis, ipDebt, himeraScore) {
   const himComp = computeHimeraComponent(himeraScore);
   if (himComp.score > 0) {
     components.push({ key: 'himera', title: 'Himera-скоринг', ...himComp });
+  }
+
+  // v7.2: Микрозаймы — финансовая нагрузка
+  const mlComp = computeMicroloansComponent(microloans);
+  if (mlComp.score > 0) {
+    components.push({ key: 'microloans', title: 'Микрозаймы', ...mlComp });
   }
 
   // Остальные категории — суммарно, с потолками
@@ -3401,6 +3470,18 @@ function computeScoreV7(analysis, ipDebt, himeraScore) {
 
   // Надбавки/штрафы
   const adjustments = computeConfidenceAdjustments(analysis, ipDebt, hasExplicitFacts);
+
+  // v7.2: ЭСКАЛАЦИЯ ЗА СОВОКУПНОСТЬ — когда плохо сразу по многим направлениям,
+  // профиль комплексно негативный → балл должен стремиться к 100.
+  const dt = SCORE_CONFIG_V7.driverThresholds;
+  const compScore = (key) => { const c = components.find(x => x.key === key); return c ? c.score : 0; };
+  let drivers = 0;
+  for (const key of Object.keys(dt)) { if (compScore(key) >= dt[key]) drivers++; }
+  if (drivers >= 3) {
+    const esc = drivers >= 4 ? 15 : 10;
+    adjustments.push({ label: `+ Совокупность: ${drivers} драйвера риска`, value: +esc });
+  }
+
   const adjustSum = adjustments.reduce((s, a) => s + a.value, 0);
 
   // Гейт: без явных фактов — потолок 20
