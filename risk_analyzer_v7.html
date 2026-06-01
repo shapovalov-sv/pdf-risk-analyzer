@@ -1110,7 +1110,7 @@ const NEGATION_PATTERNS = [
   // === ПРЕПОЗИЦИОННЫЕ (стоят перед ключевым словом) ===
   'не\\s+имее(т|тся|м|шь)',
   'не\\s+имел(|а|о|и)',
-  'отсутств(ует|уют|ие|ия|ием|уя)',
+  'отсутств[а-яё]*',
   'не\\s+привлекал(ся|ась|ись|ось)',
   'не\\s+судим(ый|а|ы)?',
   'несудим',
@@ -1145,7 +1145,7 @@ const NEGATION_PATTERNS = [
   '__post:не\\s+числит(ся)?',
   '__post:не\\s+зарегистриров(ан|ана|ано|аны)',
   '__post:не\\s+привлекал(ся|ась|ись|ось)',
-  '__post:отсутств(ует|уют|уя|ие|ия)',
+  '__post:отсутств[а-яё]*',
   '__post:не\\s+производил(ся|ась|ось|ись)',
   '__post:аннулирован(а|о|ы)?',
   '__post:погашен(а|о|ы)?',
@@ -3046,7 +3046,12 @@ const SCORE_CONFIG_V7 = {
   driverThresholds: {
     criminal: 25, fssp: 10, bankruptcy: 5, wanted: 1,
     extremism: 1, microloans: 5, tax: 3, credit: 5
-  }
+  },
+
+  // v7.2: пороги тяжести — подтверждённый факт сразу поднимает балл не ниже
+  // указанного (судимый ⇒ как минимум высокий риск, независимо от прочего).
+  // Не применяется к отрицанным/погашенным/историческим и сильно ослабленным матчам.
+  severityFloors: { conviction: 60, heavyDeed: 70 }
 };
 
 // --------------------------------------------------------------------------
@@ -3482,15 +3487,38 @@ function computeScoreV7(analysis, ipDebt, himeraScore, microloans) {
     adjustments.push({ label: `+ Совокупность: ${drivers} драйвера риска`, value: +esc });
   }
 
-  const adjustSum = adjustments.reduce((s, a) => s + a.value, 0);
-
   // Гейт: без явных фактов — потолок 20
-  let totalScore = rawSum + adjustSum;
+  let totalScore = rawSum + adjustments.reduce((s, a) => s + a.value, 0);
   let gated = false;
   if (!hasExplicitFacts && totalScore > SCORE_CONFIG_V7.noFactsCap) {
     totalScore = SCORE_CONFIG_V7.noFactsCap;
     gated = true;
   }
+
+  // v7.2: ПОРОГ ТЯЖЕСТИ — подтверждённый тяжёлый факт поднимает балл не ниже
+  // floor (судимость ⇒ ≥60, тяжкое деяние ⇒ ≥70). Учитываем только активные,
+  // не отрицанные/исторические и не сильно ослабленные матчи (conf ≥ 0.6).
+  const crim = analysis.categories.criminal;
+  const hasStrongCrim = (labels) => crim && crim.matches.some(m =>
+    !m.negated && !m.historical && !m.historicalModified &&
+    (m.confidenceMultiplier == null || m.confidenceMultiplier >= 0.6) &&
+    labels.some(lbl => m.keyword === lbl || m.keyword.includes(lbl))
+  );
+  const fl = SCORE_CONFIG_V7.severityFloors;
+  let floor = 0;
+  if (hasStrongCrim(SCORE_CONFIG_V7.heavyDeedLabels)) floor = fl.heavyDeed;
+  else if (hasStrongCrim(SCORE_CONFIG_V7.convictionLabels)) floor = fl.conviction;
+  if (floor > 0 && totalScore < floor) {
+    adjustments.push({
+      label: floor === fl.heavyDeed
+        ? `Порог: подтверждённое тяжкое деяние → не ниже ${floor}`
+        : `Порог: подтверждённая судимость → не ниже ${floor}`,
+      value: +(floor - totalScore)
+    });
+    totalScore = floor;
+  }
+
+  const adjustSum = adjustments.reduce((s, a) => s + a.value, 0);
   // Clamp в [0, 100]
   totalScore = Math.max(0, Math.min(100, Math.round(totalScore)));
 
