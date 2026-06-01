@@ -1808,7 +1808,10 @@ const IP_DEBT_TYPES = [
   { kind: 'tax',      re: /(?:по\s+налог[а-яёa-z0-9]*|налогов[а-яёa-z0-9]+\s+задолженн|недоимк[а-яёa-z0-9]*|пеня\s+по\s+налог)/i,  label: 'налоги',           weight: 1.3 },
   { kind: 'gibdd',    re: /штраф\s+(?:гибдд|гаи|мвд)|по\s+постановлени[а-яёa-z0-9]+\s+гибдд/i,                    label: 'штраф ГИБДД',      weight: 0.5 },
   { kind: 'utility',  re: /коммунальн[а-яёa-z0-9]+|жкх|за\s+(?:электр|газ|воду|отоплен)/i,                          label: 'ЖКХ',              weight: 0.8 },
-  { kind: 'credit',   re: /кредит[а-яёa-z0-9]*|по\s+кредитн[а-яёa-z0-9]+\s+договор|займ[а-яёa-z0-9]*|микрозайм/i,                     label: 'кредит/займ',      weight: 1.0 },
+  // v7.1: ТОЛЬКО явная формулировка основания взыскания. Раньше бил по голым
+  // «кредит»/«займ»/«микрозайм» и ложно срабатывал на «Сумма займа»/«КЛИЕНТЫ МФО»
+  // из соседних блоков микрозаймов (в записях ИП поля «тип долга» нет вовсе).
+  { kind: 'credit',   re: /по\s+кредитн[а-яёa-z0-9]+\s+договор|кредитн[а-яёa-z0-9]+\s+задолженн|задолженност[а-яёa-z0-9]*\s+по\s+(?:кредит|займ|микрозайм)/i, label: 'кредит/займ',      weight: 1.0 },
   { kind: 'judgment', re: /по\s+решени[а-яёa-z0-9]+\s+суда|исполнительн[а-яёa-z0-9]+\s+лист|по\s+(?:приговор|определени)/i, label: 'по решению суда',  weight: 1.0 },
   { kind: 'damages',  re: /возмещени[а-яёa-z0-9]+\s+(?:ущерб|вред|убытк)/i,                                          label: 'возмещение ущерба', weight: 1.1 }
 ];
@@ -2039,9 +2042,12 @@ function extractIPDebt(normalizedText, pageTexts) {
 
 // ==========================================================================
 // v7.1: ЗАЯВКИ НА МИКРОЗАЙМЫ (отдельная таблица, как ИП)
-// Формат HimeraSearch — карточка «поле → значение»; ровно один маркер
-// «Сумма займа N» на каждую заявку. Дата берётся из «Дата и время заявки»
-// (или «Дата заявки/займа»), организация — если присутствует (ООО/МФО/МКК/МФК).
+// Формат HimeraSearch — карточка «поле → значение»; маркер записи —
+// «Сумма займа N». Порядок полей в блоке РАЗНЫЙ (дата/период могут стоять
+// и до, и после суммы) → для каждого поля берём ближайшее к якорю вхождение
+// в окне записи. Организация — домен из заголовка секции («ФИНТЕРРА.РФ
+// ЗАЯВКИ НА МИКРОЗАЙМЫ», «MICROKLAD.RU …»); «OCM&DS&CTY» — код источника,
+// не кредитор, поэтому домен-паттерн его не ловит (org = null).
 // ==========================================================================
 const MICROLOAN_MIN_AMOUNT = 500; // мусорные мелкие числа отсекаем
 
@@ -2054,45 +2060,57 @@ function extractMicroloans(normalizedText, pageTexts) {
   // Якорь записи — «Сумма займа <число>». «руб»/«₽» необязательны.
   // ВНИМАНИЕ: «заявки» содержит «я» (не и/й); \w в JS не матчит кириллицу → [а-яё].
   const sumRe = /сумма\s+займ[а-яё]*\s*[:_]?\s*(\d[\d\s ]*(?:[.,]\d{1,2})?)/gi;
-  // Дата самой заявки/займа (НЕ «дата выдачи документа» — это паспорт).
-  const dateRe = /дата(?:\s+и\s+время)?\s+(?:заявк[а-яё]*|займ[а-яё]*)\s*[:_]?\s*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?/i;
-  const periodRe = /период\s+займ[а-яё]*[^\d]{0,20}(\d{1,4})/i;
-  const cityRe = /насел[её]нн[а-яё]*\s+пункт\s*[:_]?\s*([А-ЯЁA-Z][А-ЯЁA-Z\-.\s]{1,40}?)(?=\s+(?:период|регион|сумма|дата|телефон|паспорт|имя|$))/i;
-  const orgRe = /(?:ООО|ОАО|АО|ПАО|МФО|МКК|МФК|НКО|КПК)\s+["«»]?[А-ЯЁA-Z][А-ЯЁа-яёA-Za-z0-9"«»\-\s]{2,40}/;
+  const anchors = [];
+  let m;
+  while ((m = sumRe.exec(normalizedText)) !== null) {
+    const amount = parseLoanAmount(m[1]);
+    if (amount !== null) anchors.push({ amount, start: m.index, end: sumRe.lastIndex });
+  }
+  if (anchors.length === 0) return null;
+
+  // Поля записи (ищем ближайшее к якорю вхождение). Дата заявки/займа —
+  // НЕ «дата выдачи документа» (паспорт). Период ИЛИ срок займа.
+  const dateRe = /дата(?:\s+и\s+время)?\s+(?:заявк[а-яё]*|займ[а-яё]*)\s*[:_]?\s*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/gi;
+  const periodRe = /(?:период|срок)\s+займ[а-яё]*[^\d]{0,20}(\d{1,4})/gi;
+  const cityRe = /(?:насел[её]нн[а-яё]*\s+пункт|место\s+рождени[а-яё]*)\s*[:_]?\s*([А-ЯЁ][А-ЯЁ\-.]{1,30})/gi;
+  // Организация — домен перед «ЗАЯВКИ НА МИКРОЗАЙМ» (ФИНТЕРРА.РФ / MICROKLAD.RU / DENGA.RU).
+  const orgRe = /([A-ZА-ЯЁ0-9][A-ZА-ЯЁ0-9\-]*\.(?:РФ|RU|COM|РУ|SU|ORG|NET))\s+заявк[а-яё]*\s+на\s+микрозайм/gi;
+
+  // Ближайшее к anchorPos вхождение (группа 1) в окне [lo, hi).
+  function nearest(re, lo, hi, anchorPos) {
+    re.lastIndex = lo;
+    let best = null, bestDist = Infinity, mm;
+    while ((mm = re.exec(normalizedText)) !== null && mm.index < hi) {
+      const dist = Math.abs(mm.index - anchorPos);
+      if (dist < bestDist) { bestDist = dist; best = mm[1]; }
+    }
+    return best;
+  }
 
   const loans = [];
-  let m, iter = 0, prevEnd = 0;
-  while ((m = sumRe.exec(normalizedText)) !== null && iter < 5000) {
-    iter++;
-    const amount = parseLoanAmount(m[1]);
-    if (amount === null) { prevEnd = sumRe.lastIndex; continue; }
+  for (let i = 0; i < anchors.length; i++) {
+    const a = anchors[i];
+    // Окно записи ограничено соседними якорями — поля принадлежат своей записи.
+    const lo = Math.max(i > 0 ? anchors[i - 1].end : 0, a.start - 450);
+    const hi = Math.min(i < anchors.length - 1 ? anchors[i + 1].start : normalizedText.length, a.end + 350);
 
-    // Окно записи: от предыдущей «Суммы займа» (но не дальше 700 символов назад)
-    // до текущего якоря — поля даты/периода/города идут ВНУТРИ блока перед суммой.
-    const winStart = Math.max(prevEnd, m.index - 700);
-    const block = normalizedText.slice(winStart, m.index);
-
-    const dm = block.match(dateRe);
-    const pm = block.match(periodRe);
-    const cm = block.match(cityRe);
-    const om = block.match(orgRe);
+    const dateStr = nearest(dateRe, lo, hi, a.start);
+    const periodStr = nearest(periodRe, lo, hi, a.start);
+    const cityStr = nearest(cityRe, lo, hi, a.start);
+    const orgStr = nearest(orgRe, lo, a.start, a.start); // заголовок секции — до суммы
 
     // v7.1: позиция в исходном PDF (страница + bbox) для перехода по клику
-    const loc = pageTexts ? locateMatch(pageTexts, m.index, m[0]) : null;
-
+    const loc = pageTexts ? locateMatch(pageTexts, a.start, normalizedText.slice(a.start, a.end)) : null;
     loans.push({
-      amount,
-      date: dm ? dm[1] : null,
-      period: pm ? parseInt(pm[1], 10) : null,
-      city: cm ? cm[1].trim().replace(/\s+/g, ' ') : null,
-      org: om ? om[0].trim().replace(/\s+/g, ' ') : null,
+      amount: a.amount,
+      date: dateStr || null,
+      period: periodStr ? parseInt(periodStr, 10) : null,
+      city: cityStr ? cityStr.trim().replace(/\s+/g, ' ') : null,
+      org: orgStr ? orgStr.trim() : null,
       pageNum: loc ? loc.pageNum : null,
       bbox: loc ? loc.bbox : null
     });
-    prevEnd = sumRe.lastIndex;
   }
-
-  if (loans.length === 0) return null;
 
   // Сортировка по дате (новые сверху), затем по сумме
   const dnum = d => {
