@@ -2859,12 +2859,15 @@ const SCORE_CONFIG_V7 = {
   caps: {
     criminal:      60,  // главный драйвер
     fssp:          25,
+    wanted:        25,  // розыск / меры пресечения
+    extremism:     25,  // экстремизм / терроризм / санкции
     bankruptcy:    15,
     himera:        10,
     credit:         8,
-    tax_debts:      5,
-    discipline:     5,
-    affiliation:    3,
+    tax:            8,  // налоговые нарушения
+    administrative: 5,  // адм. правонарушения
+    court:          5,  // судебные разбирательства
+    license:        5,  // лицензии / дисквалификация
     other:          3   // все прочие категории суммарно
   },
   // Лимит безфактического режима
@@ -2962,6 +2965,32 @@ function detectExplicitFacts(analysis, ipDebt, himeraScore) {
         kind: 'bankruptcy_strong',
         label: `Банкротство: ${strongBankr.length} активн. матчей`,
         count: strongBankr.length
+      });
+    }
+  }
+
+  // 7) v7.1: Активный розыск / меры пресечения — явный факт
+  const wanted = analysis.categories.wanted;
+  if (wanted) {
+    const strongWanted = wanted.matches.filter(m => !m.negated && !m.historical && m.weight === 3);
+    if (strongWanted.length > 0) {
+      facts.push({
+        kind: 'wanted_active',
+        label: `Розыск/меры пресечения (${strongWanted[0].keyword})`,
+        count: strongWanted.length
+      });
+    }
+  }
+
+  // 8) v7.1: Экстремизм / терроризм / санкции — явный факт
+  const extremism = analysis.categories.extremism;
+  if (extremism) {
+    const strongExtr = extremism.matches.filter(m => !m.negated && !m.historical && m.weight === 3);
+    if (strongExtr.length > 0) {
+      facts.push({
+        kind: 'extremism_active',
+        label: `Экстремизм/терроризм/санкции (${strongExtr[0].keyword})`,
+        count: strongExtr.length
       });
     }
   }
@@ -3211,11 +3240,17 @@ function computeScoreV7(analysis, ipDebt, himeraScore) {
   }
 
   // Остальные категории — суммарно, с потолками
+  // v7.1: привязываем РЕАЛЬНЫЕ ключи категорий (раньше tax_debts/discipline/
+  // affiliation не существовали → давали 0, а розыск/экстремизм/налоги/суды
+  // сваливались в 3-балльный «прочий» бакет).
   const otherCategories = [
-    { key: 'credit',      cap: SCORE_CONFIG_V7.caps.credit,      title: 'Кредитные риски' },
-    { key: 'tax_debts',   cap: SCORE_CONFIG_V7.caps.tax_debts,   title: 'Налоги и долги' },
-    { key: 'discipline',  cap: SCORE_CONFIG_V7.caps.discipline,  title: 'Дисциплина' },
-    { key: 'affiliation', cap: SCORE_CONFIG_V7.caps.affiliation, title: 'Связи/аффилированность' }
+    { key: 'wanted',         cap: SCORE_CONFIG_V7.caps.wanted,         title: 'Розыск и меры пресечения' },
+    { key: 'extremism',      cap: SCORE_CONFIG_V7.caps.extremism,      title: 'Экстремизм / терроризм / санкции' },
+    { key: 'credit',         cap: SCORE_CONFIG_V7.caps.credit,         title: 'Кредитные риски' },
+    { key: 'tax',            cap: SCORE_CONFIG_V7.caps.tax,            title: 'Налоговые нарушения' },
+    { key: 'administrative', cap: SCORE_CONFIG_V7.caps.administrative, title: 'Адм. правонарушения' },
+    { key: 'court',          cap: SCORE_CONFIG_V7.caps.court,          title: 'Судебные разбирательства' },
+    { key: 'license',        cap: SCORE_CONFIG_V7.caps.license,        title: 'Лицензии / дисквалификация' }
   ];
   for (const oc of otherCategories) {
     const comp = computeSimpleComponent(analysis.categories[oc.key], oc.cap, oc.title);
@@ -3225,7 +3260,7 @@ function computeScoreV7(analysis, ipDebt, himeraScore) {
   }
 
   // Highlighted red и прочие категории, которые не в списке выше — суммарно до 3
-  const knownKeys = new Set(['criminal', 'fssp', 'bankruptcy', 'credit', 'tax_debts', 'discipline', 'affiliation']);
+  const knownKeys = new Set(['criminal', 'fssp', 'bankruptcy', 'wanted', 'extremism', 'credit', 'tax', 'administrative', 'court', 'license']);
   let otherRaw = 0;
   let otherCount = 0;
   for (const [key, cat] of Object.entries(analysis.categories)) {
