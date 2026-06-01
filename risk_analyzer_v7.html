@@ -523,6 +523,15 @@
   .ip-table .ip-type.alimony { color: var(--danger); border-color: rgba(255,74,110,0.4); background: rgba(255,74,110,0.08); }
   .ip-table .ip-type.tax { color: var(--info); border-color: rgba(74,168,255,0.4); background: rgba(74,168,255,0.08); }
   .ip-table tr.closed-row { opacity: 0.55; }
+  /* v7.1: кликабельные строки ИП/микрозаймов — переход в исходный PDF */
+  .ip-table tr.src-link { cursor: pointer; transition: background 0.15s ease; }
+  .ip-table tr.src-link:hover { background: rgba(74, 168, 255, 0.10); }
+  .ip-table tr.src-link:hover .src-jump { opacity: 1; }
+  .src-jump {
+    font-size: 10px; color: var(--info); opacity: 0.45;
+    font-family: 'JetBrains Mono', monospace; white-space: nowrap;
+    transition: opacity 0.15s ease;
+  }
 
   footer { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 12px; font-family: 'JetBrains Mono', monospace; text-align: center; line-height: 1.7; }
   @media (max-width: 700px) {
@@ -1922,7 +1931,7 @@ function findIpAmount(normalizedText, ipPos, ipEnd, hardWinStart, hardWinEnd) {
   return best;
 }
 
-function extractIPDebt(normalizedText) {
+function extractIPDebt(normalizedText, pageTexts) {
   // Разрешаем пробелы внутри номера, разные тире, кириллицу/латиницу для И/П
   const ipPattern = /(?:^|[^\d])(\d{3,7})\s*(?:[\/\\\.][\s\u00a0]*|[\s\u00a0]+)(\d{2})\s*(?:[\/\\\.][\s\u00a0]*|[\s\u00a0]+)(\d{4,7})[\s\u00a0]*[-\u2013\u2014][\s\u00a0]*[\u0438\u0418iI][\s\u00a0]*[\u043F\u041FpP](?![а-яёa-z])/g;
   const occurrences = [];
@@ -1992,6 +2001,9 @@ function extractIPDebt(normalizedText) {
       if (!isClosedPaid) totalActiveSum += amt;
     }
 
+    // v7.1: позиция в исходном PDF (страница + bbox) для перехода по клику
+    const loc = pageTexts ? locateMatch(pageTexts, entry.firstPos, entry.number) : null;
+
     ips.push({
       number: entry.number,
       amount: amt,
@@ -2001,7 +2013,9 @@ function extractIPDebt(normalizedText) {
       debtType: debtType.label,
       debtKind: debtType.kind,
       debtWeight: debtType.weight,
-      mentions: entry.occurrences.length
+      mentions: entry.occurrences.length,
+      pageNum: loc ? loc.pageNum : null,
+      bbox: loc ? loc.bbox : null
     });
   }
 
@@ -2036,7 +2050,7 @@ function parseLoanAmount(raw) {
   return (isNaN(num) || num < MICROLOAN_MIN_AMOUNT || num >= 1e9) ? null : num;
 }
 
-function extractMicroloans(normalizedText) {
+function extractMicroloans(normalizedText, pageTexts) {
   // Якорь записи — «Сумма займа <число>». «руб»/«₽» необязательны.
   // ВНИМАНИЕ: «заявки» содержит «я» (не и/й); \w в JS не матчит кириллицу → [а-яё].
   const sumRe = /сумма\s+займ[а-яё]*\s*[:_]?\s*(\d[\d\s ]*(?:[.,]\d{1,2})?)/gi;
@@ -2063,12 +2077,17 @@ function extractMicroloans(normalizedText) {
     const cm = block.match(cityRe);
     const om = block.match(orgRe);
 
+    // v7.1: позиция в исходном PDF (страница + bbox) для перехода по клику
+    const loc = pageTexts ? locateMatch(pageTexts, m.index, m[0]) : null;
+
     loans.push({
       amount,
       date: dm ? dm[1] : null,
       period: pm ? parseInt(pm[1], 10) : null,
       city: cm ? cm[1].trim().replace(/\s+/g, ' ') : null,
-      org: om ? om[0].trim().replace(/\s+/g, ' ') : null
+      org: om ? om[0].trim().replace(/\s+/g, ' ') : null,
+      pageNum: loc ? loc.pageNum : null,
+      bbox: loc ? loc.bbox : null
     });
     prevEnd = sumRe.lastIndex;
   }
@@ -2230,10 +2249,10 @@ async function analyzeEntry(entry) {
   entry.analysis = analysis;
 
   // Extract unique IPs with debt amounts
-  entry.ipDebt = extractIPDebt(normalizedText);
+  entry.ipDebt = extractIPDebt(normalizedText, entry.pageTexts);
 
   // v7.1: заявки на микрозаймы (отдельная таблица)
-  entry.microloans = extractMicroloans(normalizedText);
+  entry.microloans = extractMicroloans(normalizedText, entry.pageTexts);
 
   // v5: факт-ориентированный скоринг категории "ФССП"
   // ВАЖНО: в v7 этот блок оставлен для совместимости (категория fssp по-прежнему имеет .score),
@@ -3796,8 +3815,14 @@ function renderDetailHtml(entry) {
       const amtFmt = ip.amount !== null
         ? ip.amount.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₽'
         : '—';
-      html += `<tr class="${closed ? 'closed-row' : ''}">
-        <td>${escapeHtml(ip.number)}</td>
+      // v7.1: клик по строке → переход в исходный PDF
+      const cls = `${closed ? 'closed-row' : ''}${ip.pageNum ? ' src-link' : ''}`.trim();
+      const dataAttr = ip.pageNum
+        ? ` data-page="${ip.pageNum}" data-bbox="${ip.bbox ? JSON.stringify(ip.bbox).replace(/"/g, '&quot;') : ''}" title="Открыть в документе (стр. ${ip.pageNum})"`
+        : '';
+      const jump = ip.pageNum ? ` <span class="src-jump">стр. ${ip.pageNum} →</span>` : '';
+      html += `<tr class="${cls}"${dataAttr}>
+        <td>${escapeHtml(ip.number)}${jump}</td>
         <td class="amount-col">${escapeHtml(amtFmt)}</td>
         <td><span class="ip-status ${escapeHtml(ip.statusKind)}">${escapeHtml(ip.status)}</span></td>
         <td><span class="ip-type ${escapeHtml(ip.debtKind)}">${escapeHtml(ip.debtType)}</span></td>
@@ -3828,8 +3853,13 @@ function renderDetailHtml(entry) {
       const orgCity = l.org
         ? escapeHtml(l.org)
         : (l.city ? `<span style="color:var(--text-dim);">${escapeHtml(l.city)}</span>` : `<span style="color:var(--text-dim);">не указана</span>`);
-      html += `<tr>
-        <td>${escapeHtml(l.date || '—')}</td>
+      // v7.1: клик по строке → переход в исходный PDF
+      const srcAttr = l.pageNum
+        ? ` class="src-link" data-page="${l.pageNum}" data-bbox="${l.bbox ? JSON.stringify(l.bbox).replace(/"/g, '&quot;') : ''}" title="Открыть в документе (стр. ${l.pageNum})"`
+        : '';
+      const jump = l.pageNum ? ` <span class="src-jump">стр. ${l.pageNum} →</span>` : '';
+      html += `<tr${srcAttr}>
+        <td>${escapeHtml(l.date || '—')}${jump}</td>
         <td class="amount-col">${escapeHtml(amtFmt)}</td>
         <td>${escapeHtml(periodFmt)}</td>
         <td>${orgCity}</td>
@@ -3985,6 +4015,20 @@ function attachCategoryHandlers(root, fileIdx) {
       let bbox = null;
       try {
         const raw = btn.getAttribute('data-bbox');
+        if (raw) bbox = JSON.parse(raw);
+      } catch (err) {}
+      openPdfAtPage(fileIdx, pageNum, bbox);
+    });
+  });
+  // v7.1: строки таблиц ИП и микрозаймов — клик открывает исходный PDF
+  root.querySelectorAll('tr.src-link').forEach(row => {
+    row.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const pageNum = parseInt(row.dataset.page, 10);
+      if (!pageNum) return;
+      let bbox = null;
+      try {
+        const raw = row.getAttribute('data-bbox');
         if (raw) bbox = JSON.parse(raw);
       } catch (err) {}
       openPdfAtPage(fileIdx, pageNum, bbox);
