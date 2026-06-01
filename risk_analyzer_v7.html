@@ -1879,6 +1879,11 @@ function detectDebtType(windowText) {
   return { kind: 'unknown', label: 'не указан', weight: 1.0 };
 }
 
+// v7.1: минимальная «значимая» сумма долга по ИП. Мелкие числа рядом с номером
+// ИП (сборы, пошлины, обрывки, индексы) ненадёжны как сумма долга и риска почти
+// не несут — игнорируем их (строка покажет «—»). При необходимости поднять/опустить.
+const IP_MIN_AMOUNT = 1000;
+
 function findIpAmount(normalizedText, ipPos, ipEnd, hardWinStart, hardWinEnd) {
   const winStart = Math.max(hardWinStart != null ? hardWinStart : 0, ipPos - 350);
   const winEnd = Math.min(hardWinEnd != null ? hardWinEnd : normalizedText.length, ipEnd + 500);
@@ -1892,6 +1897,7 @@ function findIpAmount(normalizedText, ipPos, ipEnd, hardWinStart, hardWinEnd) {
       const found = findAmountsInWindow(tail, true);  // v5.1: разрешаем без "руб."
       found.sort((a, b) => a.start - b.start);
       for (const amt of found) {
+        if (amt.value < IP_MIN_AMOUNT) continue; // v7.1: мелкие суммы игнорируем
         const absStart = winStart + am.index + am[0].length + amt.start;
         const absEnd = absStart + (amt.end - amt.start);
         if (!isFakeAmountContext(normalizedText, absStart, absEnd)) {
@@ -1906,6 +1912,7 @@ function findIpAmount(normalizedText, ipPos, ipEnd, hardWinStart, hardWinEnd) {
   const tightFound = findAmountsInWindow(tight);
   let best = null, bestDist = Infinity;
   for (const amt of tightFound) {
+    if (amt.value < IP_MIN_AMOUNT) continue; // v7.1: мелкие суммы игнорируем
     const absStart = tightStart + amt.start;
     const absEnd = absStart + (amt.end - amt.start);
     if (isFakeAmountContext(normalizedText, absStart, absEnd)) continue;
