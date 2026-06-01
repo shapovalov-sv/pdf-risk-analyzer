@@ -2023,6 +2023,72 @@ function extractIPDebt(normalizedText) {
   };
 }
 
+// ==========================================================================
+// v7.1: ЗАЯВКИ НА МИКРОЗАЙМЫ (отдельная таблица, как ИП)
+// Формат HimeraSearch — карточка «поле → значение»; ровно один маркер
+// «Сумма займа N» на каждую заявку. Дата берётся из «Дата и время заявки»
+// (или «Дата заявки/займа»), организация — если присутствует (ООО/МФО/МКК/МФК).
+// ==========================================================================
+const MICROLOAN_MIN_AMOUNT = 500; // мусорные мелкие числа отсекаем
+
+function parseLoanAmount(raw) {
+  const num = parseFloat(String(raw).replace(/[\s ]/g, '').replace(',', '.'));
+  return (isNaN(num) || num < MICROLOAN_MIN_AMOUNT || num >= 1e9) ? null : num;
+}
+
+function extractMicroloans(normalizedText) {
+  // Якорь записи — «Сумма займа <число>». «руб»/«₽» необязательны.
+  // ВНИМАНИЕ: «заявки» содержит «я» (не и/й); \w в JS не матчит кириллицу → [а-яё].
+  const sumRe = /сумма\s+займ[а-яё]*\s*[:_]?\s*(\d[\d\s ]*(?:[.,]\d{1,2})?)/gi;
+  // Дата самой заявки/займа (НЕ «дата выдачи документа» — это паспорт).
+  const dateRe = /дата(?:\s+и\s+время)?\s+(?:заявк[а-яё]*|займ[а-яё]*)\s*[:_]?\s*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?/i;
+  const periodRe = /период\s+займ[а-яё]*[^\d]{0,20}(\d{1,4})/i;
+  const cityRe = /насел[её]нн[а-яё]*\s+пункт\s*[:_]?\s*([А-ЯЁA-Z][А-ЯЁA-Z\-.\s]{1,40}?)(?=\s+(?:период|регион|сумма|дата|телефон|паспорт|имя|$))/i;
+  const orgRe = /(?:ООО|ОАО|АО|ПАО|МФО|МКК|МФК|НКО|КПК)\s+["«»]?[А-ЯЁA-Z][А-ЯЁа-яёA-Za-z0-9"«»\-\s]{2,40}/;
+
+  const loans = [];
+  let m, iter = 0, prevEnd = 0;
+  while ((m = sumRe.exec(normalizedText)) !== null && iter < 5000) {
+    iter++;
+    const amount = parseLoanAmount(m[1]);
+    if (amount === null) { prevEnd = sumRe.lastIndex; continue; }
+
+    // Окно записи: от предыдущей «Суммы займа» (но не дальше 700 символов назад)
+    // до текущего якоря — поля даты/периода/города идут ВНУТРИ блока перед суммой.
+    const winStart = Math.max(prevEnd, m.index - 700);
+    const block = normalizedText.slice(winStart, m.index);
+
+    const dm = block.match(dateRe);
+    const pm = block.match(periodRe);
+    const cm = block.match(cityRe);
+    const om = block.match(orgRe);
+
+    loans.push({
+      amount,
+      date: dm ? dm[1] : null,
+      period: pm ? parseInt(pm[1], 10) : null,
+      city: cm ? cm[1].trim().replace(/\s+/g, ' ') : null,
+      org: om ? om[0].trim().replace(/\s+/g, ' ') : null
+    });
+    prevEnd = sumRe.lastIndex;
+  }
+
+  if (loans.length === 0) return null;
+
+  // Сортировка по дате (новые сверху), затем по сумме
+  const dnum = d => {
+    if (!d) return 0;
+    const p = d.split(/[.\/-]/).map(Number);
+    let [dd, mo, yy] = p;
+    if (yy < 100) yy += 2000;
+    return (yy || 0) * 10000 + (mo || 0) * 100 + (dd || 0);
+  };
+  loans.sort((a, b) => (dnum(b.date) - dnum(a.date)) || (b.amount - a.amount));
+
+  const totalSum = loans.reduce((s, l) => s + l.amount, 0);
+  return { loans, count: loans.length, totalSum };
+}
+
 // v5.3: SELECTIVE-обработка блока "Результаты скоринга".
 // Внутри блока строки категорий со значением 1 (чисто) ВЫРЕЗАЮТСЯ (заменяются пробелами),
 // чтобы они не давали ложных сигналов "преступление" в анализаторе.
@@ -2165,6 +2231,9 @@ async function analyzeEntry(entry) {
 
   // Extract unique IPs with debt amounts
   entry.ipDebt = extractIPDebt(normalizedText);
+
+  // v7.1: заявки на микрозаймы (отдельная таблица)
+  entry.microloans = extractMicroloans(normalizedText);
 
   // v5: факт-ориентированный скоринг категории "ФССП"
   // ВАЖНО: в v7 этот блок оставлен для совместимости (категория fssp по-прежнему имеет .score),
@@ -3742,6 +3811,36 @@ function renderDetailHtml(entry) {
         <span class="ip-total-value">${escapeHtml(totFmt)}</span>
       </div>`;
     }
+    html += `</div>`;
+  }
+
+  // ====== v7.1: ТАБЛИЦА ЗАЯВОК НА МИКРОЗАЙМЫ ======
+  if (entry.microloans && entry.microloans.count > 0) {
+    const ml = entry.microloans;
+    html += `<div class="ip-debt-block" style="border-left-color: var(--info);">
+      <div class="block-title"><span class="block-title-icon">₿</span>Заявки на микрозаймы · детально</div>
+      <table class="ip-table">
+        <thead><tr><th>Дата заявки</th><th>Сумма займа</th><th>Период</th><th>Организация / город</th></tr></thead>
+        <tbody>`;
+    for (const l of ml.loans) {
+      const amtFmt = l.amount.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' ₽';
+      const periodFmt = l.period ? l.period + ' дн.' : '—';
+      const orgCity = l.org
+        ? escapeHtml(l.org)
+        : (l.city ? `<span style="color:var(--text-dim);">${escapeHtml(l.city)}</span>` : `<span style="color:var(--text-dim);">не указана</span>`);
+      html += `<tr>
+        <td>${escapeHtml(l.date || '—')}</td>
+        <td class="amount-col">${escapeHtml(amtFmt)}</td>
+        <td>${escapeHtml(periodFmt)}</td>
+        <td>${orgCity}</td>
+      </tr>`;
+    }
+    html += `</tbody></table>`;
+    const totFmt = ml.totalSum.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' ₽';
+    html += `<div class="ip-total" style="background: rgba(74,168,255,0.08); border-color: rgba(74,168,255,0.3);">
+        <span class="ip-total-label">Заявок: ${ml.count} · общая сумма</span>
+        <span class="ip-total-value" style="color: var(--info);">${escapeHtml(totFmt)}</span>
+      </div>`;
     html += `</div>`;
   }
 
