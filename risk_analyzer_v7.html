@@ -1,0 +1,4000 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Анализатор рисков PDF — v7</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;800&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --bg-card: #12121a;
+    --bg-hover: #1a1a25;
+    --border: #252535;
+    --text: #e8e8f0;
+    --text-dim: #8a8aa0;
+    --accent: #d4ff4a;
+    --danger: #ff4a6e;
+    --warning: #ffa84a;
+    --success: #4affb4;
+    --info: #4aa8ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'Manrope', sans-serif;
+    min-height: 100vh; padding: 40px 20px;
+    background-image:
+      radial-gradient(circle at 20% 10%, rgba(212, 255, 74, 0.06) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(255, 74, 110, 0.05) 0%, transparent 50%);
+  }
+  .container { max-width: 1180px; margin: 0 auto; }
+  header { margin-bottom: 40px; padding-bottom: 28px; border-bottom: 1px solid var(--border); }
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 3px; color: var(--accent);
+    text-transform: uppercase; margin-bottom: 14px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .eyebrow::before { content: ''; width: 8px; height: 8px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 12px var(--accent); }
+  h1 {
+    font-family: 'Unbounded', sans-serif; font-weight: 800;
+    font-size: clamp(30px, 5vw, 52px); line-height: 1;
+    letter-spacing: -0.02em; margin-bottom: 14px;
+  }
+  h1 .accent { color: var(--accent); font-style: italic; }
+  h1 .version {
+    font-size: 0.4em; color: var(--text-dim); font-weight: 400;
+    font-style: normal; vertical-align: middle; margin-left: 8px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .subtitle { color: var(--text-dim); font-size: 15px; max-width: 720px; line-height: 1.6; }
+  .privacy-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-top: 16px; padding: 6px 12px;
+    background: rgba(74, 255, 180, 0.08);
+    border: 1px solid rgba(74, 255, 180, 0.25);
+    border-radius: 100px; font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--success);
+  }
+  .upload-zone {
+    background: var(--bg-card); border: 2px dashed var(--border);
+    border-radius: 16px; padding: 44px 28px; text-align: center;
+    cursor: pointer; transition: all 0.2s ease; margin-bottom: 20px;
+  }
+  .upload-zone:hover, .upload-zone.drag-over { border-color: var(--accent); background: var(--bg-hover); }
+  .upload-zone.has-file { border-style: solid; border-color: var(--accent); }
+  .upload-icon { font-size: 38px; margin-bottom: 14px; display: block; }
+  .upload-text { font-size: 17px; font-weight: 500; margin-bottom: 6px; }
+  .upload-hint { color: var(--text-dim); font-size: 13px; font-family: 'JetBrains Mono', monospace; }
+  #fileInput { display: none; }
+
+  .file-list { margin-bottom: 20px; }
+  .file-list-item {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 14px; margin-bottom: 6px;
+  }
+  .file-list-item .file-icon-sm {
+    width: 32px; height: 32px; background: var(--accent); color: var(--bg);
+    border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; flex-shrink: 0;
+  }
+  .file-list-item .fl-name { flex: 1; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-list-item .fl-size { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); }
+  .file-status {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    padding: 3px 8px; border-radius: 100px; letter-spacing: 1px; text-transform: uppercase;
+    border: 1px solid var(--border); color: var(--text-dim);
+  }
+  .file-status.pending { color: var(--text-dim); border-color: var(--border); }
+  .file-status.analyzing { color: var(--info); border-color: rgba(74, 168, 255, 0.4); background: rgba(74, 168, 255, 0.08); }
+  .file-status.done { color: var(--success); border-color: rgba(74, 255, 180, 0.4); background: rgba(74, 255, 180, 0.08); }
+  .file-status.error { color: var(--danger); border-color: rgba(255, 74, 110, 0.4); background: rgba(255, 74, 110, 0.08); }
+  .file-delete { cursor: pointer; color: var(--text-dim); padding: 4px 8px; border-radius: 6px; font-size: 14px; }
+  .file-delete:hover { color: var(--danger); background: rgba(255, 74, 110, 0.08); }
+
+  .btn {
+    background: var(--accent); color: var(--bg); border: none;
+    padding: 13px 26px; font-family: 'Manrope', sans-serif; font-weight: 700;
+    font-size: 14px; border-radius: 10px; cursor: pointer;
+    transition: all 0.15s ease; letter-spacing: 0.02em;
+  }
+  .btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(212, 255, 74, 0.25); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-ghost {
+    background: transparent; color: var(--text-dim);
+    border: 1px solid var(--border); padding: 10px 16px;
+    font-size: 13px; font-weight: 500;
+  }
+  .btn-ghost:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); transform: none; box-shadow: none; }
+  .controls { display: flex; gap: 10px; margin-bottom: 32px; flex-wrap: wrap; }
+  .status {
+    background: var(--bg-card); border-left: 3px solid var(--info);
+    border-radius: 8px; padding: 14px 18px; margin-bottom: 20px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; display: none;
+  }
+  .status.show { display: block; }
+  .status.error { border-left-color: var(--danger); color: var(--danger); }
+  .loader {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    margin-right: 8px; vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .debug-panel {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px; margin-bottom: 20px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    display: none;
+  }
+  .debug-panel.show { display: block; }
+  .debug-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--border); }
+  .debug-row:last-child { border-bottom: none; }
+  .debug-label { color: var(--text-dim); }
+  .debug-value { color: var(--accent); }
+
+  .results { display: none; }
+  .results.show { display: block; animation: fadeIn 0.4s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  .batch-summary { margin-bottom: 28px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+  .batch-summary-head {
+    font-family: 'Unbounded', sans-serif; font-size: 16px; font-weight: 600;
+    margin-bottom: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .batch-summary-head .bs-counter {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text-dim); letter-spacing: 1px;
+  }
+  .bs-pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 100px; font-size: 10px; font-family: 'JetBrains Mono', monospace; margin-left: 4px; }
+  .bs-pill.high { background: rgba(255, 74, 110, 0.12); color: var(--danger); }
+  .bs-pill.medium { background: rgba(255, 168, 74, 0.12); color: var(--warning); }
+  .bs-pill.low { background: rgba(74, 255, 180, 0.12); color: var(--success); }
+  .batch-summary table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .batch-summary th {
+    text-align: left; padding: 10px 8px; font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px;
+    border-bottom: 1px solid var(--border); font-weight: 500;
+  }
+  .batch-summary td { padding: 12px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .summary-row { cursor: pointer; transition: background 0.15s; }
+  .summary-row:hover { background: var(--bg-hover); }
+  .summary-row.active { background: rgba(212, 255, 74, 0.05); }
+  .summary-row .sr-name { font-weight: 500; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .summary-row .sr-doctype { font-size: 11px; color: var(--text-dim); }
+  .summary-row .sr-top { font-size: 11px; color: var(--text-dim); }
+  .summary-row .sr-score { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+  .summary-row .sr-score-num { font-family: 'Unbounded', sans-serif; font-weight: 700; font-size: 16px; }
+  .summary-row .sr-score-num.danger { color: var(--danger); }
+  .summary-row .sr-score-num.warning { color: var(--warning); }
+  .summary-row .sr-score-num.success { color: var(--success); }
+  .summary-row .sr-score-denom { color: var(--text-dim); font-size: 11px; margin-left: 2px; }
+  .summary-detail-row td { background: var(--bg); padding: 0; border-bottom: 1px solid var(--border); }
+  .summary-detail-cell { padding: 18px 10px; }
+  .open-btn {
+    background: transparent; color: var(--accent); border: 1px solid var(--accent);
+    padding: 5px 12px; border-radius: 100px; font-size: 11px;
+    font-family: 'JetBrains Mono', monospace; cursor: pointer;
+  }
+  .open-btn:hover { background: rgba(212, 255, 74, 0.1); }
+
+  .summary-card {
+    background: linear-gradient(135deg, var(--bg-card), var(--bg-hover));
+    border: 1px solid var(--border); border-radius: 20px;
+    padding: 28px; margin-bottom: 24px; position: relative; overflow: hidden;
+  }
+  .summary-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--success), var(--warning), var(--danger));
+  }
+  .risk-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 14px; border-radius: 100px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    font-weight: 500; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 14px;
+  }
+  .risk-badge.low { background: rgba(74, 255, 180, 0.12); color: var(--success); border: 1px solid rgba(74, 255, 180, 0.3); }
+  .risk-badge.medium { background: rgba(255, 168, 74, 0.12); color: var(--warning); border: 1px solid rgba(255, 168, 74, 0.3); }
+  .risk-badge.high { background: rgba(255, 74, 110, 0.12); color: var(--danger); border: 1px solid rgba(255, 74, 110, 0.3); }
+  .summary-title { font-family: 'Unbounded', sans-serif; font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+  .summary-text { color: var(--text-dim); line-height: 1.7; font-size: 14px; }
+  .doc-type-tag {
+    display: inline-block; margin-top: 12px; padding: 5px 12px;
+    background: rgba(74, 168, 255, 0.1); border: 1px solid rgba(74, 168, 255, 0.3);
+    border-radius: 6px; font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--info);
+  }
+  .stats-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 12px; margin-top: 20px;
+  }
+  .stat { background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+  .stat-value { font-family: 'Unbounded', sans-serif; font-size: 22px; font-weight: 700; line-height: 1; margin-bottom: 6px; }
+  .stat-value.danger { color: var(--danger); }
+  .stat-value.warning { color: var(--warning); }
+  .stat-value.success { color: var(--success); }
+  .stat-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; }
+
+  .extracted-block {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 22px; margin-bottom: 24px;
+  }
+  .block-title {
+    font-family: 'Unbounded', sans-serif; font-size: 14px; font-weight: 600;
+    margin-bottom: 16px; letter-spacing: 0.02em;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .block-title-icon {
+    width: 24px; height: 24px; background: var(--accent); color: var(--bg);
+    border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+  }
+  .extracted-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+  .extracted-item { background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .extracted-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .extracted-value { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text); font-weight: 500; word-break: break-all; }
+  .extracted-value.amount { color: var(--warning); }
+  .extracted-value.code { color: var(--danger); }
+
+  .category {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 16px; margin-bottom: 12px; overflow: hidden;
+    transition: border-color 0.2s ease;
+  }
+  .category:hover { border-color: var(--text-dim); }
+  .category.risk-high { border-left: 3px solid var(--danger); }
+  .category.risk-medium { border-left: 3px solid var(--warning); }
+  .category.risk-low-conf { border-left: 3px solid var(--info); }
+  .category-header { padding: 16px 20px; display: flex; align-items: center; gap: 14px; cursor: pointer; user-select: none; }
+  .category-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .category-dot.found { background: var(--danger); box-shadow: 0 0 12px var(--danger); }
+  .category-dot.warn { background: var(--warning); box-shadow: 0 0 10px var(--warning); }
+  .category-dot.clean { background: var(--success); }
+  .category-title { flex: 1; font-weight: 600; font-size: 15px; }
+  .category-meta { display: flex; gap: 8px; align-items: center; }
+  .category-score { font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 3px 8px; background: rgba(0,0,0,0.3); border-radius: 100px; color: var(--text-dim); }
+  .category-score.high { color: var(--danger); background: rgba(255, 74, 110, 0.1); }
+  .category-score.med { color: var(--warning); background: rgba(255, 168, 74, 0.1); }
+  .chevron { color: var(--text-dim); font-size: 14px; transition: transform 0.2s ease; }
+  .category.expanded .chevron { transform: rotate(90deg); }
+  .category-body { padding: 0 20px 18px 20px; display: none; border-top: 1px solid var(--border); padding-top: 16px; }
+  .category.expanded .category-body { display: block; }
+  .empty-state { color: var(--text-dim); font-size: 13px; font-style: italic; }
+  .subgroup-title {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-dim);
+    margin: 12px 0 8px; padding-bottom: 6px; border-bottom: 1px dashed var(--border);
+  }
+  .subgroup-title:first-child { margin-top: 0; }
+  .match-item {
+    background: rgba(255, 74, 110, 0.05); border-left: 2px solid var(--danger);
+    border-radius: 6px; padding: 11px 13px; margin-bottom: 8px;
+    font-size: 13px; line-height: 1.5;
+  }
+  .match-item.confidence-medium { background: rgba(255, 168, 74, 0.05); border-left-color: var(--warning); }
+  .match-item.confidence-low { background: rgba(74, 168, 255, 0.05); border-left-color: var(--info); }
+  .match-item.negated { background: rgba(74, 255, 180, 0.05); border-left-color: var(--success); }
+  .match-item.historical { background: rgba(138, 138, 160, 0.05); border-left-color: var(--text-dim); }
+  .match-item.red-highlighted { box-shadow: inset 3px 0 0 gold; }
+  .match-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .match-keyword {
+    background: rgba(255, 74, 110, 0.15); color: var(--danger);
+    padding: 2px 8px; border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500;
+  }
+  .match-item.negated .match-keyword { background: rgba(74, 255, 180, 0.15); color: var(--success); }
+  .match-item.historical .match-keyword { background: rgba(138, 138, 160, 0.15); color: var(--text-dim); }
+  .match-item.confidence-medium .match-keyword { background: rgba(255, 168, 74, 0.15); color: var(--warning); }
+  .match-item.confidence-low .match-keyword { background: rgba(74, 168, 255, 0.15); color: var(--info); }
+  .match-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 1px;
+    color: var(--text-dim); padding: 2px 6px; border: 1px solid var(--border);
+    border-radius: 3px; text-transform: uppercase;
+  }
+  .match-label.neg { color: var(--success); border-color: rgba(74, 255, 180, 0.3); }
+  .match-label.hist { color: var(--text-dim); }
+  .match-label.high { color: var(--danger); border-color: rgba(255, 74, 110, 0.3); }
+  .match-label.med { color: var(--warning); border-color: rgba(255, 168, 74, 0.3); }
+  .match-label.red { color: #ffd700; border-color: rgba(255, 215, 0, 0.5); background: rgba(255, 215, 0, 0.05); }
+  .match-context { color: var(--text-dim); font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.7; }
+  .match-context mark { background: var(--danger); color: white; padding: 1px 4px; border-radius: 3px; font-weight: 500; }
+  .match-item.negated .match-context mark { background: var(--success); color: var(--bg); }
+  .match-item.historical .match-context mark { background: var(--text-dim); color: var(--bg); }
+  .match-item.confidence-medium .match-context mark { background: var(--warning); color: var(--bg); }
+  .match-item.confidence-low .match-context mark { background: var(--info); color: var(--bg); }
+
+  .page-link-btn {
+    display: inline-block; margin-left: 6px; padding: 2px 8px;
+    background: rgba(74, 168, 255, 0.1); color: var(--info);
+    border: 1px solid rgba(74, 168, 255, 0.3); border-radius: 100px;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    cursor: pointer; text-decoration: none;
+  }
+  .page-link-btn:hover { background: rgba(74, 168, 255, 0.2); }
+
+  .legend {
+    display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px;
+    padding: 14px 18px; background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: 10px; font-size: 12px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; color: var(--text-dim); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  .pdf-modal {
+    display: none; position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,0.85); backdrop-filter: blur(4px);
+    align-items: center; justify-content: center; padding: 40px;
+  }
+  .pdf-modal.show { display: flex; }
+  .pdf-modal-content {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 20px; max-width: 95vw; max-height: 95vh;
+    overflow: auto; position: relative;
+  }
+  .pdf-modal-close {
+    position: absolute; top: 10px; right: 14px; background: transparent;
+    color: var(--text); border: none; font-size: 22px; cursor: pointer;
+    width: 34px; height: 34px; border-radius: 50%;
+  }
+  .pdf-modal-close:hover { background: var(--bg-hover); }
+  .pdf-modal-title { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-dim); margin-bottom: 12px; }
+  .pdf-canvas-wrap { position: relative; display: inline-block; }
+  .bbox-highlight {
+    position: absolute; background: rgba(255, 230, 0, 0.35);
+    border: 2px solid gold; pointer-events: none;
+    border-radius: 2px;
+  }
+
+  .btn-danger {
+    background: rgba(255, 74, 110, 0.12); color: var(--danger);
+    border: 1px solid rgba(255, 74, 110, 0.45); padding: 10px 18px;
+    font-size: 13px; font-weight: 700;
+  }
+  .btn-danger:hover:not(:disabled) { background: rgba(255, 74, 110, 0.22); transform: none; box-shadow: none; }
+
+  .back-to-top {
+    position: fixed; bottom: 30px; right: 30px; z-index: 600;
+    background: var(--accent); color: var(--bg);
+    border: none; border-radius: 50%; width: 48px; height: 48px;
+    font-size: 22px; font-weight: 700; cursor: pointer;
+    display: none; align-items: center; justify-content: center;
+    box-shadow: 0 4px 18px rgba(212, 255, 74, 0.45);
+    transition: all 0.2s ease; line-height: 1;
+  }
+  .back-to-top.visible { display: flex; }
+  .back-to-top:hover { transform: translateY(-3px); box-shadow: 0 8px 28px rgba(212, 255, 74, 0.65); }
+
+  .ip-debt-block {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-left: 3px solid var(--warning);
+    border-radius: 16px; padding: 22px; margin-bottom: 24px;
+  }
+  .ip-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; }
+  .ip-table th { text-align: left; padding: 8px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--border); font-weight: 500; }
+  .ip-table td { padding: 10px 8px; border-bottom: 1px solid var(--border); font-family: 'JetBrains Mono', monospace; font-size: 12px; vertical-align: middle; }
+  .ip-table .amount-col { color: var(--warning); font-weight: 600; }
+  .ip-total { margin-top: 14px; padding: 12px 16px; background: rgba(255, 168, 74, 0.08); border: 1px solid rgba(255, 168, 74, 0.3); border-radius: 10px; display: flex; justify-content: space-between; align-items: center; }
+  .ip-total-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+  .ip-total-value { font-family: 'Unbounded', sans-serif; font-size: 20px; font-weight: 700; color: var(--warning); }
+
+  /* v6: компактная иконка копирования, встроена в строку ФИО */
+  .sc-fio-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    margin-bottom: 6px;
+  }
+  .sc-fio-row .sc-fio { margin-bottom: 0; flex: 1; min-width: 0; }
+  .sc-copy-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 6px;
+    width: 30px; height: 30px;
+    border: 1px solid rgba(212,255,74,0.35);
+    background: rgba(212,255,74,0.08); color: var(--accent);
+    border-radius: 8px; font-size: 14px; cursor: pointer;
+    transition: all 0.15s ease; line-height: 1;
+    position: relative;
+  }
+  .sc-copy-btn::before { content: '⎘'; font-size: 16px; }
+  .sc-copy-btn:hover {
+    background: rgba(212,255,74,0.18);
+    border-color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(212,255,74,0.2);
+  }
+  .sc-copy-btn:active { transform: translateY(0); }
+  .sc-copy-btn.copied {
+    background: rgba(74,255,180,0.15); color: var(--success);
+    border-color: rgba(74,255,180,0.4);
+  }
+  .sc-copy-btn.copied::before { content: '✓'; font-size: 14px; }
+  .sc-copy-tooltip {
+    position: absolute; bottom: calc(100% + 6px); left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-card); border: 1px solid var(--border);
+    color: var(--text-dim); font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; white-space: nowrap; padding: 4px 8px;
+    border-radius: 5px; pointer-events: none; opacity: 0;
+    transition: opacity 0.15s; z-index: 10;
+  }
+  .sc-copy-btn:hover .sc-copy-tooltip { opacity: 1; }
+  /* v5: карточка субъекта */
+  .subject-card {
+    background: linear-gradient(135deg, rgba(212,255,74,0.07), rgba(74,168,255,0.05));
+    border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 18px; padding: 22px 26px; margin-bottom: 18px;
+    position: relative; overflow: hidden;
+  }
+  .subject-card .sc-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    color: var(--accent); letter-spacing: 3px;
+    text-transform: uppercase; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .subject-card .sc-label::before {
+    content: ''; width: 6px; height: 6px; background: var(--accent);
+    border-radius: 50%; box-shadow: 0 0 10px var(--accent);
+  }
+  .subject-card .sc-fio {
+    font-family: 'Unbounded', sans-serif; font-weight: 700;
+    font-size: clamp(22px, 3.2vw, 32px); line-height: 1.1;
+    letter-spacing: -0.01em; margin-bottom: 6px;
+  }
+  .subject-card .sc-fio.empty { color: var(--danger); font-style: italic; opacity: 0.85; }
+  .subject-card .sc-dob {
+    font-family: 'JetBrains Mono', monospace; font-size: 14px;
+    color: var(--text); margin-bottom: 14px;
+  }
+  .subject-card .sc-dob .sc-age {
+    color: var(--text-dim); margin-left: 8px; font-size: 12px;
+  }
+  .subject-card .sc-meta {
+    display: flex; flex-wrap: wrap; gap: 8px 18px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--text-dim);
+  }
+  .subject-card .sc-meta-item { display: flex; gap: 6px; }
+  .subject-card .sc-meta-item .sc-meta-label {
+    text-transform: uppercase; letter-spacing: 1px;
+    font-size: 10px; opacity: 0.7;
+  }
+  .subject-card .sc-meta-item .sc-meta-value { color: var(--text); }
+  .subject-card .sc-file {
+    margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text-dim); opacity: 0.7;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* v5: выноска "Задолженность ФССП" в шапке */
+  .fssp-callout {
+    background: linear-gradient(135deg, rgba(255,168,74,0.12), rgba(255,74,110,0.08));
+    border: 1px solid rgba(255,168,74,0.4); border-left: 4px solid var(--warning);
+    border-radius: 18px; padding: 22px 26px; margin-bottom: 18px;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px;
+    align-items: center;
+  }
+  .fssp-callout.has-alimony { border-left-color: var(--danger); }
+  .fssp-callout .fc-left .fc-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    color: var(--warning); letter-spacing: 3px;
+    text-transform: uppercase; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .fssp-callout.has-alimony .fc-left .fc-label { color: var(--danger); }
+  .fssp-callout .fc-left .fc-label::before {
+    content: '⚖'; font-size: 14px;
+  }
+  .fssp-callout .fc-sum {
+    font-family: 'Unbounded', sans-serif; font-weight: 800;
+    font-size: clamp(26px, 4vw, 38px); line-height: 1; color: var(--warning);
+    margin-bottom: 8px;
+  }
+  .fssp-callout.has-alimony .fc-sum { color: var(--danger); }
+  .fssp-callout .fc-sum.no-amount { color: var(--text-dim); font-size: 18px; font-weight: 500; font-family: 'JetBrains Mono', monospace; }
+  .fssp-callout .fc-meta {
+    display: flex; flex-wrap: wrap; gap: 6px 14px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--text-dim);
+  }
+  .fssp-callout .fc-meta .fc-pill {
+    padding: 3px 10px; border-radius: 100px;
+    background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+  }
+  .fssp-callout .fc-meta .fc-pill.active { color: var(--warning); border-color: rgba(255,168,74,0.4); }
+  .fssp-callout .fc-meta .fc-pill.closed { color: var(--success); border-color: rgba(74,255,180,0.4); }
+  .fssp-callout .fc-meta .fc-pill.alimony { color: var(--danger); border-color: rgba(255,74,110,0.4); background: rgba(255,74,110,0.08); }
+
+  /* v5: расширенная таблица ИП */
+  .ip-table .ip-status, .ip-table .ip-type {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    padding: 2px 8px; border-radius: 100px;
+    background: rgba(0,0,0,0.3); border: 1px solid var(--border); color: var(--text-dim);
+  }
+  .ip-table .ip-status.active { color: var(--warning); border-color: rgba(255,168,74,0.4); background: rgba(255,168,74,0.08); }
+  .ip-table .ip-status.closed_paid, .ip-table .ip-status.terminated {
+    color: var(--success); border-color: rgba(74,255,180,0.4); background: rgba(74,255,180,0.08);
+  }
+  .ip-table .ip-type.alimony { color: var(--danger); border-color: rgba(255,74,110,0.4); background: rgba(255,74,110,0.08); }
+  .ip-table .ip-type.tax { color: var(--info); border-color: rgba(74,168,255,0.4); background: rgba(74,168,255,0.08); }
+  .ip-table tr.closed-row { opacity: 0.55; }
+
+  footer { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 12px; font-family: 'JetBrains Mono', monospace; text-align: center; line-height: 1.7; }
+  @media (max-width: 700px) {
+    body { padding: 24px 14px; }
+    .summary-card, .extracted-block { padding: 20px; }
+    .category-header { padding: 14px 16px; }
+    .category-body { padding: 16px; padding-top: 14px; }
+    .batch-summary table { font-size: 11px; }
+  }
+  /* ============================================================ */
+  /* V7: НОВЫЙ СКОРИНГ — БАЛЛ 0–100, BREAKDOWN, SCORE-BAR        */
+  /* ============================================================ */
+  .score-main {
+    margin: 16px 0 6px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .score-num {
+    font-family: 'Unbounded', sans-serif; font-weight: 800;
+    font-size: clamp(54px, 8vw, 84px); line-height: 1;
+    letter-spacing: -0.03em;
+  }
+  .score-num.danger { color: var(--danger); }
+  .score-num.warning { color: var(--warning); }
+  .score-num.success { color: var(--success); }
+  .score-denom {
+    font-family: 'JetBrains Mono', monospace; font-weight: 400;
+    font-size: 0.32em; color: var(--text-dim); margin-left: 6px;
+  }
+  .score-bar-wrap { max-width: 520px; }
+  .score-bar {
+    position: relative; height: 10px; background: rgba(0,0,0,0.35);
+    border: 1px solid var(--border); border-radius: 100px; overflow: hidden;
+  }
+  .score-bar-fill {
+    height: 100%; border-radius: 100px;
+    transition: width 0.6s ease;
+    background: linear-gradient(90deg, var(--success), var(--warning) 50%, var(--danger));
+  }
+  .score-bar-fill.success { background: var(--success); }
+  .score-bar-fill.warning { background: linear-gradient(90deg, var(--success), var(--warning)); }
+  .score-bar-fill.danger { background: linear-gradient(90deg, var(--success), var(--warning) 40%, var(--danger) 70%); }
+  .score-bar-tick {
+    position: absolute; top: 0; bottom: 0; width: 1px;
+    background: rgba(255,255,255,0.18);
+  }
+  .score-bar-labels {
+    display: flex; justify-content: space-between;
+    margin-top: 4px; font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; color: var(--text-dim); letter-spacing: 1px;
+  }
+  .gated-note {
+    display: inline-block; margin-top: 12px; padding: 5px 12px;
+    background: rgba(74, 168, 255, 0.1); border: 1px solid rgba(74, 168, 255, 0.3);
+    border-radius: 6px; font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--info);
+  }
+
+  .breakdown-block {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 22px; margin-bottom: 24px;
+  }
+  .bd-section { margin-bottom: 18px; }
+  .bd-section:last-child { margin-bottom: 0; }
+  .bd-section-title {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    letter-spacing: 2px; text-transform: uppercase;
+    color: var(--text-dim); margin-bottom: 10px;
+    padding-bottom: 6px; border-bottom: 1px dashed var(--border);
+  }
+  .bd-empty { color: var(--text-dim); font-size: 13px; font-style: italic; }
+  .bd-facts-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .bd-facts-list li {
+    padding: 8px 12px; background: rgba(74, 255, 180, 0.06);
+    border-left: 2px solid var(--success); border-radius: 6px;
+    font-size: 13px; color: var(--text);
+  }
+  .bd-table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  .bd-table th {
+    text-align: left; padding: 8px 10px;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px;
+    border-bottom: 1px solid var(--border); font-weight: 500;
+  }
+  .bd-table th.bd-num { text-align: right; }
+  .bd-table td {
+    padding: 12px 10px; border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .bd-table tr:last-child td { border-bottom: none; }
+  .bd-cat-name {
+    font-weight: 600; color: var(--text);
+    white-space: nowrap; min-width: 140px;
+  }
+  .bd-details { color: var(--text-dim); }
+  .bd-detail-row {
+    display: flex; justify-content: space-between;
+    padding: 2px 0; font-size: 12px;
+  }
+  .bd-detail-label { color: var(--text-dim); }
+  .bd-detail-value {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent); margin-left: 12px; flex-shrink: 0;
+  }
+  .bd-num { text-align: right; }
+  .bd-cat-score {
+    font-family: 'Unbounded', sans-serif; font-weight: 700;
+    font-size: 18px; color: var(--accent);
+    white-space: nowrap;
+  }
+  .bd-adjust-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .bd-adjust-list li {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 12px; border-radius: 6px;
+    font-size: 13px;
+  }
+  .bd-adjust-list li.pos {
+    background: rgba(255, 168, 74, 0.06);
+    border-left: 2px solid var(--warning);
+  }
+  .bd-adjust-list li.neg {
+    background: rgba(74, 255, 180, 0.06);
+    border-left: 2px solid var(--success);
+  }
+  .bd-adjust-val {
+    font-family: 'JetBrains Mono', monospace; font-weight: 600;
+  }
+  .bd-adjust-list li.pos .bd-adjust-val { color: var(--warning); }
+  .bd-adjust-list li.neg .bd-adjust-val { color: var(--success); }
+  .bd-total {
+    margin-top: 16px; padding: 14px 16px;
+    background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .bd-total-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 4px 0; font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; color: var(--text-dim);
+  }
+  .bd-total-val {
+    font-weight: 600; color: var(--text);
+  }
+  .bd-total-final {
+    margin-top: 8px; padding-top: 10px;
+    border-top: 1px solid var(--border);
+    font-size: 14px; font-family: 'Unbounded', sans-serif;
+    font-weight: 700; color: var(--text);
+  }
+  .bd-total-final .bd-total-val {
+    font-family: 'Unbounded', sans-serif; font-size: 20px;
+  }
+  .bd-total-final .bd-total-val.danger { color: var(--danger); }
+  .bd-total-final .bd-total-val.warning { color: var(--warning); }
+  .bd-total-final .bd-total-val.success { color: var(--success); }
+
+  .metrics-mini {
+    display: flex; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+  .mm-item {
+    flex: 1; min-width: 130px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 14px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .mm-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 9px;
+    color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px;
+  }
+  .mm-val {
+    font-family: 'Unbounded', sans-serif; font-weight: 700;
+    font-size: 18px; color: var(--text);
+  }
+  .mm-val.success { color: var(--success); }
+  .mm-val.warning { color: var(--warning); }
+  .mm-val.danger { color: var(--danger); }
+
+  /* Бейдж "Критический" — отдельный класс если нужен ярче, но используем .high */
+
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <div class="eyebrow">OFFLINE ENGINE / V7 / SCORE 0–100 / FACT-GATED</div>
+  <h1>Анализатор <span class="accent">рисков</span> PDF<span class="version">v7.0</span></h1>
+  <p class="subtitle">Балл 0–100 на основе явных фактов. Приоритет — уголовка. Без явных фактов балл ограничен 20. Прозрачный разбор: видно, из чего сложился результат. Работает полностью офлайн.</p>
+  <div class="privacy-badge">🔒 Документы не покидают ваше устройство</div>
+</header>
+
+<div class="upload-zone" id="uploadZone">
+  <span class="upload-icon">📄</span>
+  <div class="upload-text">Перетащите PDF-файлы или кликните для выбора</div>
+  <div class="upload-hint">можно выбрать несколько .pdf или .txt одновременно</div>
+  <input type="file" id="fileInput" accept="application/pdf,text/plain,.pdf,.txt" multiple>
+</div>
+
+<div class="file-list" id="fileList"></div>
+
+<div class="controls">
+  <button class="btn" id="analyzeBtn" disabled>Запустить анализ</button>
+  <button class="btn btn-ghost" id="toggleDebugBtn" disabled>Диагностика</button>
+  <button class="btn btn-danger" id="resetBtn">✕ Сбросить всё</button>
+</div>
+
+<div class="debug-panel" id="debugPanel"></div>
+
+<div class="status" id="status"></div>
+
+<div class="results" id="results">
+  <div id="batchSummary"></div>
+  <div id="detailContainer"></div>
+</div>
+
+<div class="pdf-modal" id="pdfModal">
+  <div class="pdf-modal-content">
+    <button class="pdf-modal-close" id="pdfModalClose">×</button>
+    <div class="pdf-modal-title" id="pdfModalTitle">Страница</div>
+    <div class="pdf-canvas-wrap" id="pdfCanvasWrap">
+      <canvas id="pdfCanvas"></canvas>
+    </div>
+  </div>
+</div>
+
+<footer>
+  v7.0: шкала 0–100, гейтинг по явным фактам, прозрачный breakdown компонентов балла.<br>
+  Результаты справочные — требуется проверка юристом.
+</footer>
+
+</div>
+
+<button class="back-to-top" id="backToTopBtn" title="Наверх">↑</button>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ==========================================================================
+// ГРАНИЦЫ СЛОВА ДЛЯ КИРИЛЛИЦЫ
+// ==========================================================================
+const WB_START = '(?<![а-яёa-z0-9])';
+const WB_END = '(?![а-яёa-z])';
+
+function wb(pattern) { return WB_START + pattern; }
+function wbFull(base, endings) {
+  return WB_START + base + (endings ? '(' + endings + ')?' : '') + WB_END;
+}
+
+// ==========================================================================
+// СЛОВАРИ РИСКОВ
+// ==========================================================================
+const RISK_CATEGORIES = {
+  criminal: {
+    title: 'Судимость и уголовные дела',
+    rules: [
+      // === СУДИМОСТЬ ===
+      { pattern: wb('судим(ость|ости|остью|остей|остям|остями|остях)'), weight: 3, label: 'судимость' },
+      { pattern: wb('судим(ый|ого|ому|ым|ом|ая|ой|ую|ые|ых|ыми)?'), weight: 3, label: 'судим' },
+      { pattern: wb('несудим(ый|ого|ая|ой|а|о|ы)?'), weight: 1, label: 'несудим', historical: true },
+
+      // === ОСУЖДЕНИЕ / ПРИГОВОР ===
+      { pattern: wb('осужд(ён|ен|ена|ено|ены|ённого|енного|ённому|енному|ённым|енным|ённой|енной)'), weight: 3, label: 'осуждён' },
+      { pattern: wb('осужда(ет|ется|ются|лся|лась|лись|ли)'), weight: 3, label: 'осуждается' },
+      { pattern: wb('приговор(|а|у|ом|е|ы|ов|ам|ами|ах)'), weight: 3, label: 'приговор' },
+      { pattern: wb('приговор(ён|ен|ена|ено|ены|ила|или|ил)'), weight: 3, label: 'приговорён' },
+      { pattern: wb('вынесен\\s+приговор'), weight: 3, label: 'вынесен приговор' },
+      { pattern: wb('обвинительн(ый|ого|ом|ым)\\s+приговор'), weight: 3, label: 'обвинительный приговор' },
+      { pattern: wb('оправдательн(ый|ого|ом|ым)\\s+приговор'), weight: 1, label: 'оправдательный приговор', historical: true },
+
+      // === УГОЛОВНОЕ ПРЕСЛЕДОВАНИЕ ===
+      { pattern: wb('уголовн(ое|ого|ому|ым|ом)\\s+дел'), weight: 3, label: 'уголовное дело' },
+      { pattern: wb('уголовн(ое|ого|ому|ым|ом)\\s+преследовани'), weight: 3, label: 'уголовное преследование' },
+      { pattern: wb('уголовн(ое|ого|ому|ым|ом)\\s+наказани'), weight: 3, label: 'уголовное наказание' },
+      { pattern: wb('уголовн(ая|ой|ую|ою)\\s+ответственност'), weight: 3, label: 'уголовная ответственность' },
+      { pattern: wb('возбужден(о|ие|ия|ием)?\\s+уголовн'), weight: 3, label: 'возбуждение уголовного дела' },
+      { pattern: wb('прекращен(о|ие|ия)\\s+уголовн'), weight: 2, label: 'прекращение уголовного дела' },
+
+      // === СТАТЬИ УК ===
+      { pattern: 'ст(\\.|атья|атьи|атьей|атьям)\\s*\\d+(?:\\.\\d+)?(?:\\s*ч\\.?\\s*\\d+)?(?:\\s*п\\.?\\s*[а-я\\d]+)?\\s*ук(?![а-яё])', weight: 3, label: 'статья УК' },
+      // v5.1: Himera-форматы статей УК
+      { pattern: '№\\s*(?:117|111|112|115|116|158|159|160|161|162|163|228|228\\.1|105|106|131|132|146|150|151|159\\.4)(?:\\s*ч\\.?\\s*\\d+)?', weight: 3, label: 'статья УК (№…)' },
+      { pattern: 'статья\\s+ук\\s+рф\\s*:?\\s*\\d{3,5}', weight: 3, label: 'Статья УК РФ' },
+      { pattern: 'фабула\\s*:\\s*(?:кража|грабёж|грабеж|мошенничеств|разбой|убийств|изнасиловани|причинение\\s+вреда|сбыт|хранени)', weight: 3, label: 'фабула преступления' },
+      { pattern: wb('ук\\s+рф'), weight: 2, label: 'УК РФ' },
+
+      // === НАКАЗАНИЕ ===
+      { pattern: wb('лишени(е|я|ем|ю)\\s+свободы'), weight: 3, label: 'лишение свободы' },
+      { pattern: wb('ограничени(е|я|ем|ю)\\s+свободы'), weight: 3, label: 'ограничение свободы' },
+      { pattern: wb('принудительн(ые|ых|ыми)\\s+работ'), weight: 3, label: 'принудительные работы' },
+      { pattern: wb('обязательн(ые|ых|ыми)\\s+работ'), weight: 2, label: 'обязательные работы' },
+      { pattern: wb('исправительн(ые|ых|ыми)\\s+работ'), weight: 3, label: 'исправительные работы' },
+      { pattern: wb('условн(ое|ого|ый|ым|ом)\\s+(осуждени|наказани|срок|лишени)'), weight: 3, label: 'условное осуждение' },
+      { pattern: wb('условно-досрочн(ое|ого|ое\\s+освобождени)'), weight: 2, label: 'условно-досрочное' },
+      { pattern: wb('условно\\s+досрочн'), weight: 2, label: 'условно-досрочное' },
+      { pattern: wb('испытательн(ый|ого|ым)\\s+срок'), weight: 2, label: 'испытательный срок' },
+      { pattern: wb('исправительн(ая|ой|ую)\\s+колони'), weight: 3, label: 'исправительная колония' },
+      { pattern: wb('колони(я|и|ю|ей)\\s+(общего|строгого|особого)\\s+режима'), weight: 3, label: 'колония режима' },
+      { pattern: wb('общего\\s+режима'), weight: 2, label: 'общий режим' },
+      { pattern: wb('строгого\\s+режима'), weight: 3, label: 'строгий режим' },
+      { pattern: wb('особого\\s+режима'), weight: 3, label: 'особый режим' },
+      { pattern: wb('отбыва(ет|л|ла|ли|ние|ния|нию|нием)\\s+наказани'), weight: 3, label: 'отбывает наказание' },
+      { pattern: wb('места(х)?\\s+лишения\\s+свободы'), weight: 3, label: 'места лишения свободы' },
+      { pattern: wb('сизо'), weight: 3, label: 'СИЗО' },
+      { pattern: wb('следственн(ый|ого|ом)\\s+изолятор'), weight: 3, label: 'следственный изолятор' },
+      { pattern: wb('учреждени(е|я|ем)\\s+(фсин|уфсин|увс)'), weight: 3, label: 'учреждение ФСИН' },
+      { pattern: wb('фсин'), weight: 2, label: 'ФСИН' },
+      { pattern: wb('ик[-\\s]?\\d+'), weight: 2, label: 'ИК (колония)' },
+
+      // === ПРОЦЕССУАЛЬНЫЕ РОЛИ ===
+      { pattern: wb('обвиняем(ый|ого|ому|ым|ом|ая|ой|ую|ые|ых|ыми)'), weight: 3, label: 'обвиняемый' },
+      { pattern: wb('подсудим(ый|ого|ому|ым|ом|ая|ой|ую|ые|ых|ыми)'), weight: 3, label: 'подсудимый' },
+      { pattern: wb('подозреваем(ый|ого|ому|ым|ом|ая|ой|ую|ые|ых|ыми)'), weight: 3, label: 'подозреваемый' },
+      { pattern: wb('обвинени(е|я|ю|ем|и)'), weight: 2, label: 'обвинение' },
+      { pattern: wb('предъявлен(о|ы)\\s+обвинени'), weight: 3, label: 'предъявлено обвинение' },
+
+      // === ПРЕСТУПЛЕНИЯ ===
+      { pattern: wb('преступлени(е|я|ю|ем|и|й|ям|ями|ях)'), weight: 1, label: 'преступление' },
+      { pattern: wb('совершил(|а|о|и)\\s+преступлени'), weight: 3, label: 'совершил преступление' },
+      { pattern: wb('совершени(е|и|я|ю|ем|ями|ях)\\s+преступлени'), weight: 3, label: 'совершение преступления' },
+      { pattern: wb('тяжк(ое|ого|ому|им|ом|их|ие)\\s+преступлени'), weight: 3, label: 'тяжкое преступление' },
+      { pattern: wb('особо\\s+тяжк'), weight: 3, label: 'особо тяжкое' },
+      { pattern: wb('рецидив(|а|у|ом|ы|ов|ист)'), weight: 3, label: 'рецидив' },
+      { pattern: wb('обвиня(ет|ется|ются|лся|лась|лись|ли)'), weight: 3, label: 'обвиняется' },
+      { pattern: wb('привлеч(ен|ён|ена|ено|ены|енного|ённого)\\s+к\\s+(уголовн|ответственност)'), weight: 3, label: 'привлечён к уг. отв.' },
+      { pattern: wb('привлекал(ся|ась|ись|ось)\\s+к\\s+уголовн'), weight: 3, label: 'привлекался к уг. отв.' },
+      { pattern: wb('виновн(ый|ого|ому|ым|ом|а|ой|ую)\\s+в\\s+совершени'), weight: 3, label: 'виновен в совершении' },
+      { pattern: wb('признан\\s+виновн'), weight: 3, label: 'признан виновным' },
+
+      // === КОНКРЕТНЫЕ ПРЕСТУПЛЕНИЯ ===
+      { pattern: wb('кража'), weight: 2, label: 'кража' },
+      { pattern: wb('хищени(е|я|ю|ем)'), weight: 2, label: 'хищение' },
+      { pattern: wb('мошенничеств(о|а|у|ом)'), weight: 2, label: 'мошенничество' },
+      { pattern: wb('грабёж|грабеж'), weight: 3, label: 'грабёж' },
+      { pattern: wb('разбой(|я|ю|ем)'), weight: 3, label: 'разбой' },
+      { pattern: wb('вымогательств'), weight: 3, label: 'вымогательство' },
+      { pattern: wb('убийств(о|а|у|ом)'), weight: 3, label: 'убийство' },
+      { pattern: wb('причинени(е|я)\\s+(тяжкого\\s+)?вреда\\s+здоровь'), weight: 3, label: 'причинение вреда здоровью' },
+      { pattern: wb('изнасиловани'), weight: 3, label: 'изнасилование' },
+      { pattern: wb('насильственн(ые|ых)\\s+действи'), weight: 3, label: 'насильственные действия' },
+      { pattern: wb('сбыт\\s+наркотик'), weight: 3, label: 'сбыт наркотиков' },
+      { pattern: wb('хранени(е|я)\\s+наркотик'), weight: 3, label: 'хранение наркотиков' },
+      { pattern: wb('взяточничеств|получение\\s+взятки|дача\\s+взятки'), weight: 3, label: 'взятка' },
+      { pattern: wb('коррупци'), weight: 2, label: 'коррупция' },
+
+      // === V4: РАСШИРЕННЫЕ КРИМИНАЛЬНЫЕ ТЕРМИНЫ (перед историческим) ===
+      // v7.1: «вор» как отдельный корень даёт слишком много ложных срабатываний
+      // (Воронеж, воробей, ворота, творог…), особенно когда PDF разбивает слово
+      // на фрагменты («ВОР ОНЕЖ»). Матчим только однозначно криминальные формы.
+      { pattern: wb('воровств(о|а|у|ом|е)'), weight: 2, label: 'воровство' },
+      { pattern: wb('воровск(ой|ая|ое|ого|ому|ом|ую|ие|их|им|ими)'), weight: 2, label: 'воровской' },
+      { pattern: wb('вор(|ы|а|ов|ам|ами|ах)\\s+в\\s+законе'), weight: 3, label: 'вор в законе' },
+      { pattern: wb('(карманн|квартирн|домушник|форточник)[а-я]*\\s+вор'), weight: 2, label: 'вор (карманный/квартирный)' },
+      { pattern: wbFull('мошенник', 'а|у|ом|е|и|ов|ами|ах'), weight: 3, label: 'мошенник' },
+      { pattern: wbFull('аферист', 'а|у|ом|ы|ов'), weight: 2, label: 'аферист' },
+      { pattern: wbFull('жулик', 'а|у|ом|и|ов'), weight: 2, label: 'жулик' },
+      { pattern: wbFull('бандит', 'а|у|ом|ы|ов|ами|ских'), weight: 3, label: 'бандит' },
+      { pattern: wbFull('преступник', 'а|у|ом|и|ов|ами|ах'), weight: 3, label: 'преступник' },
+      { pattern: wbFull('убийц', 'а|ы|е|у|ей|ам|ами|ах'), weight: 3, label: 'убийца' },
+      { pattern: wbFull('насильник', 'а|у|ом|и|ов'), weight: 3, label: 'насильник' },
+      { pattern: wb('наркоторгов(ец|ца|цу|цы|цев)'), weight: 3, label: 'наркоторговец' },
+      { pattern: wb('наркодилер'), weight: 3, label: 'наркодилер' },
+      { pattern: wb('наркоман(|а|у|ом|ы|ов|ии)'), weight: 2, label: 'наркоман' },
+      { pattern: wbFull('взяточник', 'а|у|ом|и|ов'), weight: 3, label: 'взяточник' },
+      { pattern: wbFull('коррупционер', 'а|у|ом|ы|ов'), weight: 3, label: 'коррупционер' },
+      { pattern: wbFull('контрабандист', 'а|у|ом|ы|ов'), weight: 3, label: 'контрабандист' },
+      { pattern: wb('преступн(ая|ое|ого|ому|ым|ом|ой|ую|ые|ых|ыми)\\s+(группа|группировк|сообществ|организаци|деятельност)'), weight: 3, label: 'преступная группа' },
+      { pattern: wbFull('опг'), weight: 3, label: 'ОПГ' },
+      { pattern: wbFull('опс'), weight: 3, label: 'ОПС' },
+      { pattern: wbFull('рейдер', 'а|у|ом|ы|ов|ск(ая|ое|ого|ие)'), weight: 2, label: 'рейдер' },
+      { pattern: wb('легализац(ия|ии|ией|ию)\\s+(доход|денежн|средств)'), weight: 3, label: 'легализация доходов' },
+      { pattern: wb('отмывани(е|я|ем|ю)\\s+(денег|доход|средств|преступн)'), weight: 3, label: 'отмывание денег' },
+      { pattern: wb('заказчик\\s+убийств'), weight: 3, label: 'заказчик убийств' },
+      { pattern: wb('наёмн(ый|ого|ому|ым|ом)\\s+убийц'), weight: 3, label: 'наёмный убийца' },
+      { pattern: wbFull('педофил', 'а|у|ом|ы|ов|ии'), weight: 3, label: 'педофил' },
+      { pattern: wbFull('маньяк', 'а|у|ом|и|ов'), weight: 3, label: 'маньяк' },
+      { pattern: wb('хулиганств(о|а|у|ом|е)'), weight: 2, label: 'хулиганство' },
+      { pattern: wb('браконьер(|а|у|ом|ы|ов|ск)'), weight: 2, label: 'браконьер' },
+
+      // === СМЯГЧЕНИЯ / ИСТОРИЧЕСКОЕ ===
+      { pattern: wb('(погашен|снят)(ая|ой|ы|ая\\s+судимост|ые\\s+судимост)'), weight: 1, label: 'погашенная/снятая судимость', historical: true },
+      { pattern: wb('амнисти(я|и|ей|ю|ями|ях)'), weight: 1, label: 'амнистия', historical: true },
+      { pattern: wb('помиловани(е|я|ю|ем)'), weight: 1, label: 'помилование', historical: true },
+      { pattern: wb('реабилитиров(ан|ана|аны)'), weight: 1, label: 'реабилитирован', historical: true }
+    ]
+  },
+  administrative: {
+    title: 'Административные правонарушения',
+    rules: [
+      { pattern: 'ст(\\.|атья|атьи)\\s*\\d+(?:\\.\\d+)?(?:\\s*ч\\.?\\s*\\d+)?\\s*коап(?![а-яё])', weight: 3, label: 'статья КоАП' },
+      { pattern: wb('коап\\s+рф'), weight: 2, label: 'КоАП РФ' },
+      { pattern: wb('административн(ое|ого|ому|ым|ом)\\s+правонарушени'), weight: 3, label: 'админ. правонарушение' },
+      { pattern: wb('административн(ый|ого|ому|ым|ом)\\s+штраф'), weight: 2, label: 'административный штраф' },
+      { pattern: wb('административн(ый|ого|ому|ым|ом)\\s+арест'), weight: 3, label: 'административный арест' },
+      { pattern: wb('лишени(е|я|ем)\\s+(специального\\s+)?права'), weight: 3, label: 'лишение прав' },
+      { pattern: wb('лишени(е|я|ем)\\s+водительск'), weight: 3, label: 'лишение водительских прав' },
+      { pattern: wb('состояни(е|и)\\s+(алкогольного|наркотического)\\s+опьянени'), weight: 3, label: 'состояние опьянения' },
+      { pattern: wb('(алкогольн|наркотическ)(ого|ом)\\s+опьянени'), weight: 3, label: 'опьянение' },
+      { pattern: wb('нетрезв(ом|ый|ого)\\s+(состоянии|виде)'), weight: 3, label: 'нетрезвое состояние' },
+      { pattern: wb('мелк(ое|ого|ому|ым|ом)\\s+(хулиганств|хищени)'), weight: 2, label: 'мелкое правонарушение' },
+      { pattern: wb('неуплат(а|ы|е|у)\\s+(административного\\s+)?штрафа'), weight: 2, label: 'неуплата штрафа' },
+      { pattern: wb('протокол\\s+об?\\s+административном'), weight: 3, label: 'протокол КоАП' },
+      { pattern: wb('привлекал(ся|ась|ись|ось)\\s+к\\s+административн'), weight: 3, label: 'привлечение к админ. отв.' },
+      { pattern: wb('привлечени(е|я|ем)\\s+к\\s+административн'), weight: 3, label: 'привлечение к админ. отв.' },
+      { pattern: wb('постановлени(е|я|ем)\\s+о\\s+(назначении\\s+)?административн'), weight: 3, label: 'постановление КоАП' }
+    ]
+  },
+  fssp: {
+    title: 'Задолженность ФССП / Исполнительное производство',
+    rules: [
+      { pattern: wb('фссп'), weight: 2, label: 'ФССП' },
+      { pattern: wb('федеральн(ая|ой|ую)\\s+служб(а|ы|у|е)\\s+судебн'), weight: 2, label: 'ФССП' },
+      { pattern: wb('судебн(ый|ого|ому|ым|ом|ыми)\\s+пристав'), weight: 2, label: 'судебный пристав' },
+      { pattern: wb('исполнительн(ое|ого|ому|ым|ом)\\s+производств'), weight: 3, label: 'исп. производство' },
+      { pattern: '\\d+/\\d+/\\d+[-–]?[иИ][пП]', weight: 3, label: 'номер ИП' },
+      { pattern: wb('исполнительн(ый|ого|ому|ым|ом)\\s+лист'), weight: 3, label: 'исполнительный лист' },
+      { pattern: wb('исполнительск(ий|ого|ому|им|ом)\\s+сбор'), weight: 2, label: 'исп. сбор' },
+      { pattern: wb('арест\\s+(имуществ|счет|счёт|банковск|денежн)'), weight: 3, label: 'арест имущества/счёта' },
+      { pattern: wb('обращени(е|я|ем)\\s+взыскани'), weight: 3, label: 'обращение взыскания' },
+      { pattern: wb('(ограничени|запрет)\\s+на?\\s+выезд'), weight: 3, label: 'запрет выезда' },
+      { pattern: wb('задолженност(ь|и|ью|ям|ями|ях)\\s+по\\s+алимент'), weight: 3, label: 'алиментная задолженность' },
+      { pattern: wb('алиментн(ая|ой|ую|ые|ых)'), weight: 2, label: 'алиментная' },
+      { pattern: wb('просроченн(ая|ой|ую)\\s+задолженност'), weight: 2, label: 'просроченная задолженность' },
+      { pattern: wb('взыскани(е|я|ем|ю)\\s+задолженност'), weight: 2, label: 'взыскание задолженности' },
+      { pattern: wb('взыскател(ь|я|ю|ем|и|ей|ям)'), weight: 0, label: 'взыскатель' },
+      { pattern: wb('должник(|а|у|ом|е|и|ов|ам|ами|ах)'), weight: 0, label: 'должник' }
+    ]
+  },
+  bankruptcy: {
+    title: 'Банкротство',
+    rules: [
+      { pattern: wb('призна(н|на|ны|ть)\\s+банкрот'), weight: 3, label: 'признан банкротом' },
+      { pattern: wb('дел(о|а|у|ом|е)\\s+о\\s+банкротств'), weight: 3, label: 'дело о банкротстве' },
+      { pattern: wb('процедур(а|ы|е|у|ой)\\s+банкротств'), weight: 3, label: 'процедура банкротства' },
+      { pattern: wb('конкурсн(ое|ого|ому|ым|ом)\\s+производств'), weight: 3, label: 'конкурсное производство' },
+      { pattern: wb('реализаци(я|и|ей|ю)\\s+имуществ'), weight: 2, label: 'реализация имущества' },
+      { pattern: wb('реструктуризаци(я|и|ей|ю)\\s+долг'), weight: 2, label: 'реструктуризация долга' },
+      { pattern: wb('(финансов|арбитражн)(ый|ого|ому|ым|ом)\\s+управляющ'), weight: 2, label: 'фин. управляющий' },
+      { pattern: wb('несостоятельн(ость|ости|ым|ой|ую)'), weight: 2, label: 'несостоятельность' },
+      { pattern: wb('неплатёжеспособ|неплатежеспособ'), weight: 2, label: 'неплатёжеспособность' },
+      { pattern: wb('внешн(ее|его|ему|им|ем)\\s+управлени'), weight: 2, label: 'внешнее управление' },
+      { pattern: wb('банкрот(|а|у|ом|ы|ов|ам|ами|ах|ств|ства|ству|ством|стве)'), weight: 2, label: 'банкрот' },
+      { pattern: wb('едрсб'), weight: 3, label: 'ЕДРСБ' },
+      { pattern: wb('федресурс'), weight: 2, label: 'Федресурс' }
+    ]
+  },
+  wanted: {
+    title: 'Розыск и меры пресечения',
+    rules: [
+      { pattern: wb('в\\s+розыск(|е|а|у)'), weight: 3, label: 'в розыске' },
+      { pattern: wb('объявлен(|а|ы|о)\\s+в\\s+розыск'), weight: 3, label: 'объявлен в розыск' },
+      { pattern: wb('(федеральн|международн)(ый|ого|ом|ым)\\s+розыск'), weight: 3, label: 'розыск' },
+      { pattern: wb('интерпол'), weight: 3, label: 'Интерпол' },
+      { pattern: wb('экстрадици(я|и|ей|ю)'), weight: 3, label: 'экстрадиция' },
+      { pattern: wb('подписк(а|и|у|ой)\\s+о\\s+невыезде'), weight: 3, label: 'подписка о невыезде' },
+      { pattern: wb('домашн(ий|его|ему|им|ем)\\s+арест'), weight: 3, label: 'домашний арест' },
+      { pattern: wb('запрет\\s+определённых\\s+действий'), weight: 2, label: 'запрет действий' },
+      { pattern: wb('скрывается\\s+от\\s+(следстви|суда)'), weight: 3, label: 'скрывается' },
+      { pattern: wb('мер(а|ы|ой)\\s+пресечени'), weight: 2, label: 'мера пресечения' },
+      { pattern: wb('заключени(е|я|ем)\\s+под\\s+стражу'), weight: 3, label: 'заключение под стражу' }
+    ]
+  },
+  extremism: {
+    title: 'Экстремизм, терроризм, санкции',
+    rules: [
+      { pattern: wb('экстремистск(ий|ого|ому|им|ом|ая|ой|ую|ие|их|ими)'), weight: 3, label: 'экстремистский' },
+      { pattern: wb('экстремизм(|а|у|ом|е)'), weight: 3, label: 'экстремизм' },
+      { pattern: wb('террористическ(ий|ого|ому|им|ом|ая|ой|ую|ие|их|ими)'), weight: 3, label: 'террористический' },
+      { pattern: wb('терроризм(|а|у|ом|е)'), weight: 3, label: 'терроризм' },
+      { pattern: wb('росфинмониторинг'), weight: 3, label: 'Росфинмониторинг' },
+      { pattern: wb('перечн(е|я|ю|ем)\\s+террористов'), weight: 3, label: 'перечень террористов' },
+      { pattern: wb('sdn\\s+list'), weight: 3, label: 'SDN List' },
+      { pattern: wb('ofac'), weight: 3, label: 'OFAC' },
+      { pattern: wb('санкционн(ый|ого|ому|ым|ом|ая|ой|ую|ые|ых)\\s+список'), weight: 3, label: 'санкционный список' },
+      { pattern: wb('иностранн(ый|ого|ому|ым|ом)\\s+агент'), weight: 2, label: 'иностранный агент' },
+      { pattern: wb('нежелательн(ая|ой|ую|ые|ых)\\s+организаци'), weight: 2, label: 'нежелательная орг.' },
+      { pattern: wb('запрещённ(ая|ой|ую)|запрещенн(ая|ой|ую)\\s+организаци'), weight: 2, label: 'запрещённая орг.' }
+    ]
+  },
+  credit: {
+    title: 'Кредитная история',
+    rules: [
+      { pattern: wb('плох(ая|ой|ую)\\s+кредитн(ая|ой|ую)\\s+истори'), weight: 3, label: 'плохая КИ' },
+      { pattern: wb('просрочк(а|и|у|ой|ах)\\s+по\\s+(кредит|займ|ипотек)'), weight: 3, label: 'просрочка по кредиту' },
+      { pattern: wb('невыплат(а|ы|у|ой)\\s+(кредит|займ)'), weight: 3, label: 'невыплата кредита' },
+      { pattern: wb('неуплат(а|ы|у|ой)\\s+(кредит|займ)'), weight: 3, label: 'неуплата кредита' },
+      { pattern: wb('коллекторск(ий|ого|ое|ая|ой|ую)'), weight: 2, label: 'коллекторы' },
+      { pattern: wb('коллектор(|а|у|ом|ы|ов|ами|ах)'), weight: 2, label: 'коллектор' },
+      { pattern: wb('безнадежн(ый|ого|ая)\\s+долг'), weight: 3, label: 'безнадёжный долг' },
+      { pattern: wb('списани(е|я|ем)\\s+долга'), weight: 2, label: 'списание долга' },
+      { pattern: wb('чёрн(ый|ого)\\s+список|черн(ый|ого)\\s+список'), weight: 0, label: 'чёрный список' },
+      { pattern: wb('микрозайм(|а|у|ов|ы|ами)'), weight: 0, label: 'микрозайм' }
+    ]
+  },
+  tax: {
+    title: 'Налоговые нарушения',
+    rules: [
+      { pattern: wb('налогов(ая|ой|ую|ою)\\s+задолженност'), weight: 3, label: 'налоговая задолженность' },
+      { pattern: wb('недоимк(а|и|у|ой|ах)'), weight: 3, label: 'недоимка' },
+      { pattern: wb('уклонени(е|я|ю|ем)\\s+от\\s+уплаты\\s+налог'), weight: 3, label: 'уклонение от налогов' },
+      { pattern: wb('неуплат(а|ы|у|ой)\\s+налог'), weight: 3, label: 'неуплата налогов' },
+      { pattern: wb('налогов(ое|ого|ому|ым|ом)\\s+правонарушени'), weight: 3, label: 'налоговое правонарушение' },
+      { pattern: wb('дисквалификаци(я|и|ей|ю)\\s+руководител'), weight: 3, label: 'дисквалификация' },
+      { pattern: wb('массов(ый|ого|ому|ым|ом)\\s+(руководител|учредител)'), weight: 2, label: 'массовый рук./учред.' },
+      { pattern: wb('фирм(а|ы|е|у|ой)\\W+однодневк'), weight: 3, label: 'фирма-однодневка' },
+      { pattern: wb('блокировк(а|и|у|ой)\\s+счёт|блокировк(а|и|у|ой)\\s+счет'), weight: 3, label: 'блокировка счёта' },
+      { pattern: wb('приостановлени(е|я|ем)\\s+операций'), weight: 2, label: 'приостановление операций' }
+    ]
+  },
+  court: {
+    title: 'Судебные разбирательства',
+    rules: [
+      { pattern: wb('исковы(е|х|ми|ми)\\s+требовани'), weight: 2, label: 'исковые требования' },
+      { pattern: wb('исково(е|го|му|м)\\s+заявлени'), weight: 2, label: 'исковое заявление' },
+      { pattern: wb('(подан|поданы|подано)\\s+иск'), weight: 2, label: 'подан иск' },
+      { pattern: wb('решени(е|я|ю|ем|и)\\s+суда'), weight: 1, label: 'решение суда' },
+      { pattern: wb('определени(е|я|ю|ем|и)\\s+суда'), weight: 1, label: 'определение суда' },
+      { pattern: wb('апелляци(я|и|ей|ю|онн)'), weight: 1, label: 'апелляция' },
+      { pattern: wb('кассаци(я|и|ей|онн)'), weight: 1, label: 'кассация' },
+      { pattern: wb('возмещени(е|я|ем)\\s+(ущерба|убытк)'), weight: 2, label: 'возмещение ущерба' },
+      { pattern: wb('компенсаци(я|и|ей|ю)\\s+морального\\s+вреда'), weight: 2, label: 'компенсация морального вреда' },
+      { pattern: wb('арбитражн(ое|ого|ому|ым|ом)\\s+дел'), weight: 2, label: 'арбитражное дело' }
+    ]
+  },
+  license: {
+    title: 'Лицензии и дисквалификация',
+    rules: [
+      { pattern: wb('(лишени|отзыв|аннулировани|приостановлени)\\s+лицензи'), weight: 3, label: 'отзыв лицензии' },
+      { pattern: wb('дисквалифициров(ан|ана|аны|анного|анной)'), weight: 3, label: 'дисквалифицирован' },
+      { pattern: wb('дисквалификаци(я|и|ей|ю|ей)'), weight: 2, label: 'дисквалификация' },
+      { pattern: wb('реестр\\s+дисквалифицированных'), weight: 3, label: 'реестр дисквалифицированных' },
+      { pattern: wb('запрет\\s+занимать\\s+должност'), weight: 3, label: 'запрет должностей' },
+      { pattern: wb('запрет\\s+заниматься\\s+деятельност'), weight: 3, label: 'запрет деятельности' }
+    ]
+  },
+  highlighted_red: {
+    title: 'Красный текст в PDF',
+    rules: []
+  }
+};
+
+// ==========================================================================
+// КЕШ СКОМПИЛИРОВАННЫХ REGEXP (п.1 оптимизации)
+// Компилируем один раз при загрузке, не при каждом анализе документа.
+// ==========================================================================
+const COMPILED_RULES = (() => {
+  const out = {};
+  for (const [key, cat] of Object.entries(RISK_CATEGORIES)) {
+    out[key] = cat.rules.map(rule => {
+      const pat = rule.pattern.replace(/ё/g, '[её]');
+      let _regex = null;
+      try { _regex = new RegExp(pat, 'gi'); } catch (e) { console.warn('Bad pattern:', rule.pattern, e); }
+      return { ...rule, _regex };
+    });
+  }
+  return out;
+})();
+
+// ==========================================================================
+// ОТРИЦАНИЯ
+// ==========================================================================
+// v5: помечаем постпозиционные отрицания (могут стоять ПОСЛЕ ключевого слова)
+const POSTPOSITION_FLAG = '__post';
+
+const NEGATION_PATTERNS = [
+  // === ПРЕПОЗИЦИОННЫЕ (стоят перед ключевым словом) ===
+  'не\\s+имее(т|тся|м|шь)',
+  'не\\s+имел(|а|о|и)',
+  'отсутств(ует|уют|ие|ия|ием|уя)',
+  'не\\s+привлекал(ся|ась|ись|ось)',
+  'не\\s+судим(ый|а|ы)?',
+  'несудим',
+  'не\\s+состои(т|шь|м)',
+  'не\\s+состоял(|а|о|и)',
+  'не\\s+зарегистриров(ан|ана|ано|аны)',
+  'без\\s+судимост',
+  'без\\s+задолженност',
+  'нет\\s+сведений',
+  'не\\s+установлен(|а|о|ы)',
+  'не\\s+выявлен(|а|о|ы)',
+  'не\\s+обнаружен(|а|о|ы)',
+  'не\\s+находит(ся)?',
+  'не\\s+находил(ся|ась|ось|ись)',
+  'не\\s+числит(ся)?',
+  'справк(а|и|е|у)\\s+об\\s+отсутствии',
+  'сведения\\s+об\\s+отсутствии',
+  'подтвержда(ет|ют)\\s+отсутствие',
+  'не\\s+привлекалс',
+  'не\\s+является\\s+(должником|банкротом|обвиняемым)',
+  'освобожд(ён|ен)(|а|ы)\\s+от\\s+(наказани|ответственност)',
+  'прекращен(о|а|ы)\\s+в\\s+связи\\s+с',
+  'ист(ё|е)к\\s+срок\\s+давности',
+  'оправдан(|а|ы)\\s+судом?',
+
+  // === v5 ПОСТПОЗИЦИОННЫЕ (после ключа): помечены __post ===
+  '__post:не\\s+имее(т|тся|м|шь)',
+  '__post:не\\s+имел(|а|о|и)',
+  '__post:не\\s+выявлен(|а|о|ы)',
+  '__post:не\\s+установлен(|а|о|ы)',
+  '__post:не\\s+обнаружен(|а|о|ы)',
+  '__post:не\\s+числит(ся)?',
+  '__post:не\\s+зарегистриров(ан|ана|ано|аны)',
+  '__post:не\\s+привлекал(ся|ась|ись|ось)',
+  '__post:отсутств(ует|уют|уя|ие|ия)',
+  '__post:не\\s+производил(ся|ась|ось|ись)',
+  '__post:аннулирован(а|о|ы)?',
+  '__post:погашен(а|о|ы)?',
+  '__post:снят(а|о|ы)?',
+  '__post:оправдан(|а|ы)?',
+  '__post:прекращен(о|а|ы)\\s+в\\s+связи'
+];
+
+// Кеш скомпилированных регексов отрицаний (компилируем один раз)
+const COMPILED_NEGATIONS = NEGATION_PATTERNS.map(negEntry => {
+  const postposition = negEntry.startsWith('__post:');
+  const pattern = postposition ? negEntry.slice('__post:'.length) : negEntry;
+  let regex = null;
+  try { regex = new RegExp(pattern, 'gi'); } catch (e) {}
+  return { postposition, pattern, regex };
+});
+
+// v5: расширенный список маркеров цитирования закона
+const CITATION_PATTERN = /(согласно\s+(?:ч\.\s*\d+\s+)?ст|в\s+соответствии\s+со?\s+(?:ч\.\s*\d+\s+)?ст|предусмотренн[а-яёa-z0-9]+\s+(?:ч\.\s*\d+\s+)?ст|ч\.\s*\d+\s+ст|по\s+смыслу\s+(?:ч\.\s*\d+\s+)?ст|комментари[а-яёa-z0-9]*\s+к\s+(?:ч\.\s*\d+\s+)?ст|толкование\s+(?:ч\.\s*\d+\s+)?ст|применени[а-яёa-z0-9]+\s+(?:норм\s+)?ст|нарушение\s+(?:требований\s+)?ст|квалифицир(?:уется|ован)\s+по\s+ст|санкци[а-яёa-z0-9]+\s+ст|диспозици[а-яёa-z0-9]+\s+ст)/i;
+
+// ==========================================================================
+// ТИПЫ ДОКУМЕНТОВ
+// ==========================================================================
+const DOCUMENT_TYPES = [
+  // v5.1: сводные отчёты (HimeraSearch и аналоги)
+  { id: 'aggregated_report', title: 'Сводный отчёт (HimeraSearch)', pattern: '(?:himera[\\s\\-_]?search|установочные?\\s+данные|результаты\\s+скоринга|общий\\s+показатель\\s+\\d)' },
+  { id: 'criminal_certificate', title: 'Справка о наличии (отсутствии) судимости', pattern: 'справк(а|и|у|е)\\s+о\\s+наличии\\s+\\(?\\s*отсутствии\\s*\\)?\\s+судимости' },
+  { id: 'criminal_certificate_2', title: 'Справка о судимости (МВД)', pattern: '(ик|иц|гиац|мвд).{0,100}судимост' },
+  { id: 'fssp_certificate', title: 'Документ ФССП / пристава', pattern: '(постановление|справк(а|и))\\s+.{0,50}(судебн|приставом|фссп)' },
+  { id: 'fssp_decision', title: 'Постановление об исп. производстве', pattern: 'постановлени[еяю]\\s+о\\s+возбуждении\\s+исполнительн' },
+  { id: 'tax_statement', title: 'Налоговая справка', pattern: 'справк(а|и)\\s+.{0,30}(состоянии?\\s+расч[её]тов|задолженности\\s+.{0,30}налог)' },
+  { id: 'credit_history', title: 'Кредитная история', pattern: '(кредитн(ая|ого)\\s+истори|бюро\\s+кредитных\\s+историй|нбки|объединенное\\s+кредитное\\s+бюро)' },
+  { id: 'bankruptcy_registry', title: 'Выписка реестра банкротств', pattern: '(единый\\s+федеральный\\s+реестр.{0,30}банкротств|федресурс|едрсб)' },
+  { id: 'egrul', title: 'Выписка ЕГРЮЛ/ЕГРИП', pattern: '(выписк(а|и)\\s+из\\s+егрюл|выписк(а|и)\\s+из\\s+егрип|единый\\s+государственный\\s+реестр)' },
+  { id: 'court_verdict', title: 'Приговор суда', pattern: '(именем\\s+российской\\s+федерации|приговор\\s+суда|приговорил|суд\\s+приговорил)' }
+];
+
+// ==========================================================================
+// ЭКСТРАКТОРЫ
+// ==========================================================================
+const EXTRACTORS = {
+  amounts: {
+    label: 'Денежные суммы',
+    pattern: /(\d{1,3}(?:[\s\u00a0]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s*(?:руб(?:ля|лей|\.)?|₽|rub)\b/gi,
+    format: (m) => m[0]
+  },
+  caseIP: {
+    label: 'Номера исп. производств',
+    pattern: /\b\d+\/\d+\/\d+[-–]?[иИ][пП]\b/gi,
+    format: (m) => m[0].toUpperCase()
+  },
+  caseCourt: {
+    label: 'Номера судебных дел',
+    pattern: /\b[АA]\d{2}[-–]\d+\/\d{4}\b|\b\d+[-–](?:К[АГСУ]|КАД|АД)\d*\/\d{4}\b|\bдел[оаеу]\s+№\s*[\w\-\/]+/gi,
+    format: (m) => m[0]
+  },
+  inn: {
+    label: 'ИНН',
+    pattern: /\b(?:инн[:\s]*)?(\d{10}|\d{12})\b/gi,
+    format: (m) => m[1] || m[0],
+    validate: (v) => /^\d{10}$|^\d{12}$/.test(v)
+  },
+  ogrn: {
+    label: 'ОГРН/ОГРНИП',
+    pattern: /\b(?:огрн(?:ип)?[:\s]*)?(\d{13}|\d{15})\b/gi,
+    format: (m) => m[1] || m[0],
+    validate: (v) => /^\d{13}$|^\d{15}$/.test(v)
+  },
+  articlesUK: {
+    label: 'Статьи УК РФ',
+    // v5.1: добавлены форматы Himera: «№159», «№158 Ч. 4», «Статья УК РФ: 14603»
+    pattern: /\bст(?:\.|атья)\s*(\d+(?:\.\d+)?(?:\s*ч\.?\s*\d+)?(?:\s*п\.?\s*[а-я\d]+)?)\s*(?:ук|уголовного)|№\s*(\d{2,3})(?:\s*ч\.?\s*(\d+))?|статья\s+ук\s+рф\s*:?\s*(\d{3,5})/gi,
+    format: (m) => {
+      // отфильтровать нереалистичные номера статей УК (реальный диапазон ~100-360)
+      const validUk = (n) => n >= 100 && n <= 360;
+      if (m[1]) {
+        const num = parseInt(m[1]);
+        return validUk(num) ? 'ст. ' + m[1] + ' УК' : null;
+      }
+      if (m[4]) {
+        const s = m[4];
+        if (s.length >= 4) {
+          const stArt = parseInt(s.slice(0, -2));
+          const ch = parseInt(s.slice(-2));
+          if (validUk(stArt) && ch >= 1 && ch <= 9) return 'ст. ' + stArt + ' ч. ' + ch + ' УК';
+          return null;
+        }
+        const num = parseInt(s);
+        return validUk(num) ? 'ст. ' + s + ' УК' : null;
+      }
+      if (m[2]) {
+        const num = parseInt(m[2]);
+        if (!validUk(num)) return null;
+        if (m[3] && parseInt(m[3]) === 0) return 'ст. ' + m[2] + ' УК';
+        return 'ст. ' + m[2] + (m[3] ? ' ч. ' + m[3] : '') + ' УК';
+      }
+      return m[0];
+    }
+  },
+  articlesKoAP: {
+    label: 'Статьи КоАП',
+    pattern: /\bст(?:\.|атья)\s*(\d+(?:\.\d+)?(?:\s*ч\.?\s*\d+)?)\s*коап/gi,
+    format: (m) => 'ст. ' + m[1] + ' КоАП'
+  },
+  dates: {
+    label: 'Даты',
+    pattern: /\b(\d{1,2}[.\/\-]\d{1,2}[.\/\-]\d{2,4})\b|\b(\d{1,2}\s+(?:январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)[а-я]*\s+\d{4})/gi,
+    format: (m) => m[0]
+  }
+};
+
+// ==========================================================================
+// СОСТОЯНИЕ — v4: batch
+// ==========================================================================
+let allAnalyses = [];
+let currentDetailIndex = -1;
+let debugVisible = false;
+
+// ==========================================================================
+// DOM
+// ==========================================================================
+const uploadZone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+const fileListEl = document.getElementById('fileList');
+const analyzeBtn = document.getElementById('analyzeBtn');
+const toggleDebugBtn = document.getElementById('toggleDebugBtn');
+const resetBtn = document.getElementById('resetBtn');
+const backToTopBtn = document.getElementById('backToTopBtn');
+const status = document.getElementById('status');
+const results = document.getElementById('results');
+const debugPanel = document.getElementById('debugPanel');
+const batchSummaryEl = document.getElementById('batchSummary');
+const detailContainer = document.getElementById('detailContainer');
+const pdfModal = document.getElementById('pdfModal');
+const pdfModalClose = document.getElementById('pdfModalClose');
+const pdfModalTitle = document.getElementById('pdfModalTitle');
+const pdfCanvas = document.getElementById('pdfCanvas');
+const pdfCanvasWrap = document.getElementById('pdfCanvasWrap');
+
+// ==========================================================================
+// UPLOAD
+// ==========================================================================
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag-over');
+  const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf' || /\.(pdf|txt)$/i.test(f.name));
+  if (files.length === 0) { showStatus('Поддерживаются PDF и TXT файлы', true); return; }
+  addFiles(files);
+});
+fileInput.addEventListener('change', (e) => {
+  const files = Array.from(e.target.files);
+  if (files.length > 0) addFiles(files);
+});
+
+function addFiles(files) {
+  for (const file of files) {
+    allAnalyses.push({
+      file, name: file.name, size: file.size,
+      status: 'pending', analysis: null, rawText: null,
+      normalizedText: null, pageTexts: null, pagesCount: 0,
+      pdfDocPromise: null, error: null
+    });
+  }
+  renderFileList();
+  analyzeBtn.disabled = allAnalyses.length === 0;
+  uploadZone.classList.toggle('has-file', allAnalyses.length > 0);
+  hideStatus();
+}
+
+// П.4: точечный апдейт статуса конкретного файла (без полного rerenderFileList)
+function updateFileStatus(idx) {
+  const entry = allAnalyses[idx];
+  if (!entry) return;
+  const item = fileListEl.querySelector(`.file-delete[data-idx="${idx}"]`)
+    ?.closest('.file-list-item');
+  if (!item) return;
+  const statusEl = item.querySelector('.file-status');
+  if (statusEl) {
+    statusEl.className = `file-status ${entry.status}`;
+    statusEl.textContent = statusLabel(entry.status);
+  }
+}
+
+function renderFileList() {
+  fileListEl.innerHTML = '';
+  allAnalyses.forEach((entry, idx) => {
+    const div = document.createElement('div');
+    div.className = 'file-list-item';
+    div.innerHTML = `
+      <div class="file-icon-sm">PDF</div>
+      <div class="fl-name">${escapeHtml(entry.name)}</div>
+      <div class="fl-size">${formatBytes(entry.size)}</div>
+      <div class="file-status ${entry.status}">${statusLabel(entry.status)}</div>
+      <div class="file-delete" data-idx="${idx}" title="Удалить">✕</div>
+    `;
+    fileListEl.appendChild(div);
+  });
+  fileListEl.querySelectorAll('.file-delete').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const idx = parseInt(e.target.dataset.idx, 10);
+      allAnalyses.splice(idx, 1);
+      renderFileList();
+      analyzeBtn.disabled = allAnalyses.length === 0;
+      uploadZone.classList.toggle('has-file', allAnalyses.length > 0);
+    });
+  });
+}
+
+function statusLabel(s) {
+  switch (s) {
+    case 'pending': return 'ожидает';
+    case 'analyzing': return 'анализ…';
+    case 'done': return 'готово';
+    case 'error': return 'ошибка';
+    default: return s;
+  }
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
+function showStatus(text, isError = false, withLoader = false) {
+  status.className = 'status show' + (isError ? ' error' : '');
+  status.innerHTML = (withLoader ? '<span class="loader"></span>' : '') + text;
+}
+function hideStatus() { status.classList.remove('show'); }
+
+// ==========================================================================
+// RESET / EXPORT / DEBUG
+// ==========================================================================
+resetBtn.addEventListener('click', () => {
+  allAnalyses = [];
+  currentDetailIndex = -1;
+  fileInput.value = '';
+  renderFileList();
+  uploadZone.classList.remove('has-file');
+  analyzeBtn.disabled = true;
+  toggleDebugBtn.disabled = true;
+  results.classList.remove('show');
+  debugPanel.classList.remove('show');
+  batchSummaryEl.innerHTML = '';
+  detailContainer.innerHTML = '';
+  hideStatus();
+});
+
+toggleDebugBtn.addEventListener('click', () => {
+  debugVisible = !debugVisible;
+  debugPanel.classList.toggle('show', debugVisible);
+});
+
+function downloadFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+// ==========================================================================
+// ANALYZE BATCH
+// ==========================================================================
+analyzeBtn.addEventListener('click', async () => {
+  if (allAnalyses.length === 0) return;
+  analyzeBtn.disabled = true;
+  toggleDebugBtn.disabled = true;
+
+  for (let i = 0; i < allAnalyses.length; i++) {
+    const entry = allAnalyses[i];
+    if (entry.status === 'done') continue;
+    entry.status = 'analyzing';
+    updateFileStatus(i); // П.4: точечный апдейт, не весь список
+    showStatus(`Обработка ${i + 1} / ${allAnalyses.length}: ${entry.name}…`, false, true);
+    try {
+      await analyzeEntry(entry);
+      entry.status = 'done';
+    } catch (err) {
+      console.error(err);
+      entry.status = 'error';
+      entry.error = err.message || String(err);
+    }
+    updateFileStatus(i); // П.4: точечный апдейт
+  }
+
+  renderFileList(); // финальный полный рендер после завершения всего пакета
+
+  hideStatus();
+  toggleDebugBtn.disabled = false;
+  analyzeBtn.disabled = false;
+
+  renderBatchSummary();
+  results.classList.add('show');
+  results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+// ==========================================================================
+// ИЗВЛЕЧЕНИЕ ФИО, ДАТЫ РОЖДЕНИЯ И ДОКУМЕНТОВ СУБЪЕКТА  (v5)
+// Постраничный анализ, голосование между кандидатами,
+// стоп-лист ведомств/городов, расширенные шаблоны ДР, ИНН/СНИЛС/ОГРНИП.
+// ==========================================================================
+const SUBJECT_FIO_STOPWORDS = [
+  'российск','федерац','министерств','министр','управлени','департамент',
+  'отдел','служб','прокуратур','прокурор','верховн','конституционн',
+  'арбитражн','мировой','городск','областн','районн','народн','главн',
+  'инспекци','представительств','организаци','реестр','центральн',
+  'государствен','респуб','края','краю','краем','области','областью','район',
+  'муниципальн','посёлок','посел','деревн','село','город','предприяти',
+  'учрежден','общественн','объединени','президиум','коллеги','генеральн',
+  'комитет','комисси','администрац','правительств','совет','собрани','дум',
+  'мвд','фсб','фсо','фсин','уфсин','гувд','увд','овд','гибдд','гаи',
+  'налоговая','фнс','ифнс','пфр','сфр','фсс','росреестр','росфинмониторинг',
+  'нбки','окб','эквифакс','компани','фирм',
+  'москв','петербург','новосибирск','екатеринбург','казан','челябинск',
+  'омск','самар','ростов','краснодар','воронеж','волгоград','перм',
+  'саратов','тольятт','краснояр','тюмен','ижевск','барнаул','ульянов',
+  'хабаров','владивосток','ярослав','иркутск','махачкал','оренбург','томск',
+  'кемеров','рязан','лип','киров','чебоксар','калинин','брянск',
+  'магнитогорск','тверь','ставрополь','симферопол','белгород','архангел',
+  'курск','тамбов','смоленск',
+  'российский','советск','выдан','выдач','составлен','подписал','подписан',
+  'паспорт','свидетельств','удостоверени','постановлени','определени','решени',
+  'приговор','справк','выписк','уведомлени','протокол','предупреждени',
+  'настоящ','истинн','подлинн','копи',
+  // CAPS-стоп для Himera-выписок
+  'россия','роса','усср','осср','усс','осс','офиц','адрес','лица','имя',
+  'снилс','инн','паспорт','телефон','окб','нбки',
+  'установоч','категори','показатель','общий','сведения','сведение','докум',
+  'отчет','отчёт','реестр','базе','базы','учетн','учетный','контингент','криминал',
+  'роспис','осп','росп','смартком','альфа','тинькоф','тиньков','сбер','втб',
+  'газпром','банк','лента','окб','пнб'
+];
+
+const FIO_BASE = '(?:[А-ЯЁ][а-яё]+|[А-ЯЁ]{2,})(?:-(?:[А-ЯЁ][а-яё]+|[А-ЯЁ]{2,}))?(?:\\s+(?:[А-ЯЁ][а-яё]+|[А-ЯЁ]{2,})(?:-(?:[А-ЯЁ][а-яё]+|[А-ЯЁ]{2,}))?){1,3}';
+
+const SUBJECT_MARKERS = [
+  // высший приоритет: явное указание субъекта
+  { re: 'в\\s+отношении\\s+гр(?:\\.|ажданина|ажданки|\\-на|\\-ки)?\\s*({FIO})', weight: 10 },
+  { re: 'в\\s+отношении\\s+({FIO})', weight: 9 },
+  { re: 'должник(?:а|у|ом|е)?\\s*[:\\-]\\s*({FIO})', weight: 10 },
+  { re: 'должник(?:ом)?\\s+(?:является|являлся)\\s+({FIO})', weight: 9 },
+  { re: 'субъект(?:а|у)?\\s+проверки\\s*[:\\-]?\\s*({FIO})', weight: 10 },
+  { re: '(?:фио|ф\\.\\s*и\\.\\s*о\\.)\\s*[:\\-]\\s*({FIO})', weight: 10 },
+  { re: 'проверяем\\w+\\s+лиц[оа]\\s*[:\\-]?\\s*({FIO})', weight: 9 },
+  // документы на имя
+  { re: '(?:справк\\w+|выписк\\w+|свидетельств\\w+|сертификат\\w+)\\s+(?:о\\s+\\w+\\s+){0,2}(?:в\\s+отношении|на\\s+имя)\\s+({FIO})', weight: 8 },
+  { re: 'на\\s+имя\\s+({FIO})', weight: 6 },
+  { re: '(?:выдан\\w*|вручен\\w*|оформлен\\w*)\\s+(?:гр(?:\\.|ажданин\\w*)?\\s+)?({FIO})', weight: 5 },
+  // процессуальная роль
+  { re: '(?:осужд[её]нн?\\w*|приговор[её]нн?\\w*|подсудим\\w+|обвиняем\\w+|подозреваем\\w+)\\s*[:\\-]?\\s*({FIO})', weight: 7 },
+  { re: '({FIO})\\s*,?\\s*(?:осужд[её]н|приговор[её]н|обвиняе(?:тся|м)|подсудим)', weight: 6 },
+  // ФИО + дата рождения рядом (сильный сигнал)
+  { re: '({FIO})\\s*,?\\s*(?:\\d{1,2}[.\\/\\-]\\d{1,2}[.\\/\\-])?\\d{4}\\s*г(?:\\.|ода?)?\\s*р(?:\\.|ождения)?', weight: 8 },
+  // анкета: фамилия + имя + отчество построчно
+  { re: 'фамили[яюи]\\s*[:\\-]?\\s*([А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?)[\\s\\n]+им[яеи]\\s*[:\\-]?\\s*([А-ЯЁ][а-яё]+)[\\s\\n]+отчеств[оа]?\\s*[:\\-]?\\s*([А-ЯЁ][а-яё]+)', weight: 10, composite: true },
+  // v5.1: формат Himera/реестров — поля анкеты по-русски (без \\b — оно не работает с кириллицей)
+  { re: '(?:^|\\W)лица?\\s{2,}({FIO})', weight: 11 },
+  { re: '(?:^|\\n)\\s*[*\\-•]?\\s*лица?\\s*(?:\\n|\\r)+\\s*({FIO})', weight: 12 },
+  { re: '(?:^|\\W)имя\\s{2,}({FIO})', weight: 11 },
+  { re: '(?:^|\\W)должник\\s*\\n?\\s*({FIO})', weight: 9 },
+  { re: '(?:^|\\W)возможн[а-яё]+\\s+фамили[ияй]\\s+([А-ЯЁ]{2,}(?:\\s+[А-ЯЁ]{2,}){0,2})', weight: 4 },
+    // низкий: «гражданин ФИО»
+  { re: 'гражданин(?:а|у|е|ом|ки|ке|ку|кой)?\\s+(?:рф\\s+)?({FIO})', weight: 4 }
+];
+
+// v5.1: точные стоп-слова (равенство, не startsWith), включая адресные сокращения
+const SUBJECT_FIO_STOPWORDS_EXACT = new Set([
+  'ул','г','с','п','д','кв','офис','рф','лит','к','корп','стр','оф','пом','эт',
+  'росси','роса','усср','осср','усс','осс','офиц','окб','нбки','рп','ип','пбоюл',
+  'роп','осп','росп','пнб','пао','зао','оао','ооо','тоо','чп','нко','нп',
+  'спк','скпк','кпк','кфх','одо','одн',
+  // v5.1: метки полей анкеты Himera — не должны попадать в ФИО
+  'дата','имя','адрес','снилс','инн','паспорт','телефон','лица','лицо','возможные',
+  'фамилии','фамилия','категория','категории','показатель','общий','место','номер',
+  'сумма','долг','долга','работы','актуальности','актуализации','регистрации',
+  'возбуждения','рождения','выдачи','выдан','выдана','выдано','источник','комментарии',
+  'информация','сведения','справка','выписка','регион','оп','осп','инициатор',
+  'основание','предмет','исполнения','производства','паспорта','телефоны',
+  'имена','фамилии',
+  // v5.2: адресные элементы — частые ложные срабатывания на улицах/домах
+  'дом','улица','ул','корпус','корп','строение','стр','квартира','кв',
+  'комната','ком','помещение','пом','этаж','эт','подъезд','литера','лит',
+  'край','область','обл','район','р-н','округ','о','с','п','пос','посёлок',
+  'станица','село','деревня','дер','микрорайон','мкр','аул','хутор','х',
+  'проспект','просп','пр-кт','пр','переулок','пер','проезд','шоссе','ш',
+  'набережная','наб','тупик','аллея','бульвар','б-р','площадь','пл',
+  'дорога','тракт','спуск','съезд','въезд','м','тер','территория'
+]);
+
+function isValidFio(fioStr) {
+  if (!fioStr) return false;
+  const parts = fioStr.trim().split(/\s+/);
+  if (parts.length < 2 || parts.length > 4) return false;
+  for (const p of parts) {
+    if (p.length < 2) return false;
+    if (/\d/.test(p)) return false;
+    const lower = p.toLowerCase().replace(/ё/g, 'е');
+    // 1) Точное равенство — отсекает короткие аббревиатуры (УЛ, КВ, РФ)
+    if (SUBJECT_FIO_STOPWORDS_EXACT.has(lower)) return false;
+    // 2) startsWith — для длинных корней (РОССИЙСКАЯ, МИНИСТЕРСТВО, ВОРОНЕЖСКАЯ)
+    //    Применяем ТОЛЬКО для стоп-слов длиной >= 4 символов, чтобы не схватить
+    //    ФИО на «Гончаров», «Петров», «Сидоров» из-за коротких корней.
+    for (const stop of SUBJECT_FIO_STOPWORDS) {
+      if (stop.length >= 4 && lower.startsWith(stop)) return false;
+      // короткие (2-3 символа) стоп-слова должны совпадать ПОЛНОСТЬЮ
+      if (stop.length < 4 && lower === stop) return false;
+    }
+  }
+  return true;
+}
+
+function extractSubjectInfo(rawText, pageTexts) {
+  if (!rawText) return null;
+
+  // v5.2: ищем «зону установочных данных» — это сильный анкер первой страницы.
+  // Если есть «УСТАНОВОЧНЫЕ ДАННЫЕ» или «Лица<пробелы>ФИО» в любом месте — берём окно ±1500 вокруг него.
+  let anchorPos = -1;
+  // ищем «УСТАНОВОЧНЫЕ ДАННЫЕ», или «Лица» с любым разделителем до следующего CAPS-слова (ФИО)
+  const anchorRe = /(?:установочные?\s+данные|(?:^|\n)\s*[*\-•]?\s*лица?(?:\s|\n){1,30}[А-ЯЁ]{2,})/i;
+  const anchorMatch = rawText.match(anchorRe);
+  if (anchorMatch) anchorPos = anchorMatch.index;
+
+  let firstPageText;
+  if (anchorPos >= 0) {
+    const aStart = Math.max(0, anchorPos - 200);
+    const aEnd = Math.min(rawText.length, anchorPos + 2000);
+    firstPageText = rawText.slice(aStart, aEnd);
+  } else if (pageTexts && pageTexts[0]) {
+    firstPageText = pageTexts[0].text;
+  } else {
+    firstPageText = rawText.slice(0, 3500);
+  }
+  const segments = [
+    { text: firstPageText, bonus: 2.5 },
+    { text: rawText, bonus: 1.0 }  // вся остальная часть тоже сканируется
+  ];
+
+  const candidates = new Map();
+
+  function addCandidate(fioStr, weight, contextText) {
+    fioStr = fioStr.trim().replace(/\s+/g, ' ');
+    if (!isValidFio(fioStr)) return;
+    // v5.2: если рядом с найденной "ФИО" есть адресные элементы — это не имя, это адрес
+    if (contextText) {
+      const ctxLow = contextText.toLowerCase().replace(/ё/g, 'е');
+      const ADDRESS_NEIGHBORS = /\b(?:ул(?:\.|ица)?|дом|кв(?:\.|артир)|корп(?:\.|ус)|стр(?:\.|оение)|пр(?:\.|осп|оезд)|пер(?:\.|еулок)|край|обл(?:\.|асть)|г\.|город|посёлок|посел|деревн|село|станиц|микрорайон|шосс|тупик|алле|бульвар|площад)\b/i;
+      if (ADDRESS_NEIGHBORS.test(ctxLow)) return;
+    }
+    const key = fioStr.toLowerCase().replace(/ё/g, 'е');
+    const ex = candidates.get(key);
+    if (ex) ex.score += weight;
+    else candidates.set(key, { fio: fioStr, score: weight });
+  }
+
+  for (const seg of segments) {
+    for (const marker of SUBJECT_MARKERS) {
+      const pattern = marker.re.replace(/\{FIO\}/g, FIO_BASE);
+      let re;
+      try { re = new RegExp(pattern, 'gim'); } catch (e) { continue; }
+      let m, iter = 0;
+      while ((m = re.exec(seg.text)) !== null && iter < 200) {
+        iter++;
+        if (m[0].length === 0) { re.lastIndex++; continue; }
+        if (marker.composite) {
+          const ctxS = Math.max(0, m.index - 60);
+          const ctxE = Math.min(seg.text.length, m.index + m[0].length + 60);
+          addCandidate(m[1] + ' ' + m[2] + ' ' + m[3], marker.weight * seg.bonus, seg.text.slice(ctxS, ctxE));
+        } else if (m[1]) {
+          const ctxS = Math.max(0, m.index - 60);
+          const ctxE = Math.min(seg.text.length, m.index + m[0].length + 60);
+          addCandidate(m[1], marker.weight * seg.bonus, seg.text.slice(ctxS, ctxE));
+        }
+      }
+    }
+  }
+
+  let best = null;
+  for (const c of candidates.values()) {
+    if (!best || c.score > best.score) best = c;
+  }
+
+  const dob = findDob(rawText, best ? best.fio : null);
+  const inn = findSubjectInn(rawText);
+  const snils = findSubjectSnils(rawText);
+  const ogrnip = findSubjectOgrnip(rawText);
+
+  if (!best && !dob && !inn && !snils && !ogrnip) return null;
+
+  return {
+    fio: best ? best.fio : null,
+    fioConfidence: best ? Math.round(best.score) : 0,
+    dob,
+    age: dob ? computeAge(dob) : null,
+    inn, snils, ogrnip
+  };
+}
+
+function findDob(text, fio) {
+  if (fio) {
+    const fioPos = text.indexOf(fio);
+    if (fioPos >= 0) {
+      const winStart = Math.max(0, fioPos - 80);
+      const winEnd = Math.min(text.length, fioPos + fio.length + 200);
+      const win = text.slice(winStart, winEnd);
+      const near = win.match(/(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{2,4})/);
+      if (near) {
+        const f = formatDobParts(near[1], near[2], near[3]);
+        if (f) return f;
+      }
+      const nearYear = win.match(/(?:^|\D)((?:19|20)\d{2})\s*г(?:\.|ода?)\s*р(?:\.|ождения|\b)/i);
+      if (nearYear) return nearYear[1] + ' г.р.';
+    }
+  }
+
+  const numericPatterns = [
+    /(?:дата|год)\s+рождения\s*[:\-]?\s*(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{2,4})/i,
+    /(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{2,4})\s*(?:г(?:\.|ода)?)?\s*р(?:ождения|\.)/i,
+    /д\.?\s*р\.?\s*[:\-]?\s*(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{2,4})/i,
+    /рожд[её]нн?[ыаое][йя]?\s+(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{2,4})/i
+  ];
+  for (const re of numericPatterns) {
+    const m = text.match(re);
+    if (m) {
+      const f = formatDobParts(m[1], m[2], m[3]);
+      if (f) return f;
+    }
+  }
+
+  const months = { 'январ':1, 'феврал':2, 'март':3, 'апрел':4, 'ма':5, 'июн':6, 'июл':7, 'август':8, 'сентябр':9, 'октябр':10, 'ноябр':11, 'декабр':12 };
+  const wordPat = /(\d{1,2})\s+(январ[ья]|феврал[ья]|марта|апрел[ья]|ма[йя]|июн[ья]|июл[ья]|августа|сентябр[ья]|октябр[ья]|ноябр[ья]|декабр[ья])\s+(\d{4})/i;
+  const mw = text.match(wordPat);
+  if (mw) {
+    const monKey = Object.keys(months).find(k => mw[2].toLowerCase().startsWith(k));
+    if (monKey) {
+      const d = String(parseInt(mw[1])).padStart(2, '0');
+      const mo = String(months[monKey]).padStart(2, '0');
+      return d + '.' + mo + '.' + mw[3];
+    }
+  }
+
+  const yearOnly = text.match(/(?:^|\D)((?:19|20)\d{2})\s*г(?:\.|ода?)\s*р(?:\.|ождения|\b)/i);
+  if (yearOnly) return yearOnly[1] + ' г.р.';
+
+  return null;
+}
+
+function formatDobParts(d, mo, y) {
+  const day = parseInt(d), month = parseInt(mo);
+  let year = parseInt(y);
+  if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+  if (day < 1 || day > 31 || month < 1 || month > 12) return null;
+  if (String(y).length === 2) year = year > 30 ? 1900 + year : 2000 + year;
+  if (year < 1900 || year > new Date().getFullYear()) return null;
+  return String(day).padStart(2, '0') + '.' + String(month).padStart(2, '0') + '.' + year;
+}
+
+function computeAge(dobStr) {
+  if (!dobStr) return null;
+  const dm = dobStr.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  let y, mo, d;
+  if (dm) { d = +dm[1]; mo = +dm[2]; y = +dm[3]; }
+  else {
+    const ym = dobStr.match(/(\d{4})/);
+    if (!ym) return null;
+    y = +ym[1]; mo = 7; d = 1;
+  }
+  const now = new Date();
+  let age = now.getFullYear() - y;
+  const curM = now.getMonth() + 1, curD = now.getDate();
+  if (curM < mo || (curM === mo && curD < d)) age--;
+  if (age < 0 || age > 130) return null;
+  return age;
+}
+
+function findSubjectInn(text) {
+  // v5: \b плохо работает с кириллицей в JS, используем явный (?:^|\W) и (?!\d) для конца
+  const m = text.match(/(?:^|[^а-яёa-z])инн[\s:№\-]*(\d{12}|\d{10})(?!\d)/i);
+  return m ? m[1] : null;
+}
+function findSubjectSnils(text) {
+  const m = text.match(/(?:^|[^а-яёa-z])снилс[\s:№\-]*(\d{3}[\s\-]?\d{3}[\s\-]?\d{3}[\s\-]?\d{2})(?!\d)/i);
+  if (!m) return null;
+  const digits = m[1].replace(/\D/g, '');
+  if (digits.length !== 11) return null;
+  return digits.slice(0,3) + '-' + digits.slice(3,6) + '-' + digits.slice(6,9) + ' ' + digits.slice(9);
+}
+function findSubjectOgrnip(text) {
+  const m = text.match(/(?:^|[^а-яёa-z])огрнип[\s:№\-]*(\d{15})(?!\d)/i);
+  return m ? m[1] : null;
+}
+
+// ==========================================================================
+// ИСПОЛНИТЕЛЬНЫЕ ПРОИЗВОДСТВА — v5
+// - жёсткая нормализация номеров ИП (тире, пробелы, регистр)
+// - поиск суммы по якорю («сумма долга», «остаток задолженности», ...)
+// - распознавание статуса (возбуждено / окончено / прекращено)
+// - распознавание типа долга (алименты / налоги / кредит / ГИБДД / ЖКХ)
+// - исключение фейковых сумм (госпошлина, исп. сбор, лимит, ...)
+// ==========================================================================
+function normalizeIpNumber(raw) {
+  // v5.1: после удаления пробелов вставляем '/' если разделители были пробелами/точками
+  let s = raw.replace(/[\s\u00a0]+/g, ' ').trim().replace(/[\u2013\u2014]/g, '-').toUpperCase();
+  s = s.replace(/I/g, '\u0418').replace(/P/g, '\u041F');
+  // ищем три группы цифр и приводим к канону "AAA/BB/CCC-ИП"
+  const m = s.match(/^(\d+)[\s\.\/\\]+(\d+)[\s\.\/\\]+(\d+)[-]?(\u0418\u041F)$/);
+  if (m) return m[1] + '/' + m[2] + '/' + m[3] + '-' + m[4];
+  return s.replace(/\s+/g, '');
+}
+
+const IP_AMOUNT_ANCHORS = [
+  // основные формулировки
+  /(?:сумма|размер)[_\s]+(?:долга|задолженност[а-яёa-z0-9]*|к\s+взыскани[а-яёa-z0-9]*|подлежащ[а-яёa-z0-9]+\s+взыскани[а-яёa-z0-9]*)/i,
+  /(?:остаток|непогашенн[а-яёa-z0-9]+)[_\s]+(?:долга|задолженност[а-яёa-z0-9]*)/i,
+  /задолженность\s+(?:по\s+(?:состоянию|основному\s+долгу|алимент[а-яёa-z0-9]*|налог[а-яёa-z0-9]*)|на\s+дату|составля[а-яёa-z0-9]+)/i,
+  /взыскать\s+(?:с|сумм)/i,
+  /предмет\s+исполнени[а-яёa-z0-9]*/i,
+  // v5.2: короткие варианты полей реестров — «Долг», «Долг_руб», «К_оплате»
+  // (без \n — после нормализации переводы строк уже заменены на пробелы)
+  /(?:^|[^а-яёa-z_])долг(?:[_\s]+руб)?\s*[:_]?\s*(?=\d)/i,
+  /(?:^|[^а-яёa-z_])к\s+(?:оплате|взыскани[а-яёa-z0-9]*)\s*[:_]?\s*(?=\d)/i,
+  // поля Himera с подчёркиваниями
+  /сумма_долга(?:_руб)?\s*[:_]?\s*(?=\d)/i,
+  /долг_руб\s*[:_]?\s*(?=\d)/i
+];
+
+const IP_FAKE_AMOUNT_CONTEXTS = [
+  /госпошлин[а-яёa-z0-9]*/i,
+  /исполнительск[а-яёa-z0-9]+\s+сбор/i,
+  /процент[а-яёa-z0-9]*\s+по\s+ст\.?\s*395/i,
+  /уставн[а-яёa-z0-9]+\s+капитал/i,
+  /лимит[а-яёa-z0-9]*/i,
+  /остаток\s+на\s+счет[а-яёa-z0-9]*/i,
+  /мрот/i,
+  /прожиточн[а-яёa-z0-9]+\s+минимум/i,
+  // v5.1: почтовый индекс 6 цифр сразу после "Адрес" / "индекс" / в составе адреса
+  /(?:индекс|почтов|адрес\s+регистрац|адрес)[а-яёa-z0-9\s,]{0,30}$/i
+];
+
+const IP_STATUS_PATTERNS = [
+  { kind: 'closed_paid',  re: /окончен[оа]?\s+(?:в\s+связи\s+с\s+)?фактическ[а-яёa-z0-9]+\s+исполнени[а-яёa-z0-9]*/i, label: 'окончено (исполнено)' },
+  { kind: 'closed_paid',  re: /окончен[оа]?\s+(?:в\s+связи\s+с\s+)?уплат[а-яёa-z0-9]+/i, label: 'окончено (уплачено)' },
+  { kind: 'terminated',   re: /прекращен[оа]?\s+(?:в\s+связи\s+с\s+)?(?:истечени|невозможност|отзыв|отказ|примирени|смерть[а-яёa-z0-9]*|ликвидац)/i, label: 'прекращено' },
+  { kind: 'closed_other', re: /окончен[оа]?\s+(?:исполнительн[а-яёa-z0-9]+\s+производств[а-яёa-z0-9]*|производств[а-яёa-z0-9]*)/i, label: 'окончено' },
+  { kind: 'returned',     re: /возврат[а-яёa-z0-9]+\s+(?:исполнительн[а-яёa-z0-9]+\s+документ|без\s+исполнени)/i, label: 'возвращено без исполнения' },
+  { kind: 'active',       re: /возбужден[оа]?\s+(?:исполнительн[а-яёa-z0-9]+\s+производств|судебн[а-яёa-z0-9]+\s+пристав)/i, label: 'возбуждено' },
+  { kind: 'active',       re: /возбужден[оа]?\s+(?:в\s+отношении|должника)/i, label: 'возбуждено' },
+  { kind: 'active',       re: /(?:находится|состоит)\s+на\s+исполнени[а-яёa-z0-9]*/i, label: 'на исполнении' },
+  { kind: 'active',       re: /в\s+производств[а-яёa-z0-9]*\s+судебн[а-яёa-z0-9]+\s+пристав/i, label: 'в производстве' },
+  // v5.1: Himera-формат "ДОЛЖНИКИ ФЛ ФССП ... Номер ИП ... Сумма долга" — активный по умолчанию
+  { kind: 'active',       re: /(?:должники\s+фл\s+фссп|номер\s+ип\s*[\s\S]{0,200}\s*сумма\s+долга)/i, label: 'в реестре должников ФССП' }
+];
+
+const IP_DEBT_TYPES = [
+  { kind: 'alimony',  re: /алимент[а-яёa-z0-9]*/i,                                                                  label: 'алименты',         weight: 1.5 },
+  { kind: 'tax',      re: /(?:по\s+налог[а-яёa-z0-9]*|налогов[а-яёa-z0-9]+\s+задолженн|недоимк[а-яёa-z0-9]*|пеня\s+по\s+налог)/i,  label: 'налоги',           weight: 1.3 },
+  { kind: 'gibdd',    re: /штраф\s+(?:гибдд|гаи|мвд)|по\s+постановлени[а-яёa-z0-9]+\s+гибдд/i,                    label: 'штраф ГИБДД',      weight: 0.5 },
+  { kind: 'utility',  re: /коммунальн[а-яёa-z0-9]+|жкх|за\s+(?:электр|газ|воду|отоплен)/i,                          label: 'ЖКХ',              weight: 0.8 },
+  { kind: 'credit',   re: /кредит[а-яёa-z0-9]*|по\s+кредитн[а-яёa-z0-9]+\s+договор|займ[а-яёa-z0-9]*|микрозайм/i,                     label: 'кредит/займ',      weight: 1.0 },
+  { kind: 'judgment', re: /по\s+решени[а-яёa-z0-9]+\s+суда|исполнительн[а-яёa-z0-9]+\s+лист|по\s+(?:приговор|определени)/i, label: 'по решению суда',  weight: 1.0 },
+  { kind: 'damages',  re: /возмещени[а-яёa-z0-9]+\s+(?:ущерб|вред|убытк)/i,                                          label: 'возмещение ущерба', weight: 1.1 }
+];
+
+function findAmountsInWindow(text, allowNoSuffix) {
+  // С суффиксом руб./₽ — основной паттерн
+  const reWithSuffix = /(\d{1,3}(?:[\s\u00a0]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s*(?:руб(?:ля|лей|\.)?|\u20bd)/gi;
+  // Без суффикса — только если allowNoSuffix=true (для строк после якоря "Сумма долга")
+  const reNoSuffix = /(\d{1,3}(?:[\s\u00a0]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)/g;
+  const out = [];
+  let m;
+  while ((m = reWithSuffix.exec(text)) !== null) {
+    if (m[0].length === 0) { reWithSuffix.lastIndex++; continue; }
+    const num = parseFloat(m[1].replace(/[\s\u00a0]/g, '').replace(',', '.'));
+    if (!isNaN(num) && num >= 1 && num < 1e11) {
+      out.push({ value: num, start: m.index, end: m.index + m[0].length, hasSuffix: true });
+    }
+  }
+  if (allowNoSuffix) {
+    while ((m = reNoSuffix.exec(text)) !== null) {
+      if (m[0].length === 0) { reNoSuffix.lastIndex++; continue; }
+      const numStr = m[1].replace(/[\s\u00a0]/g, '').replace(',', '.');
+      const num = parseFloat(numStr);
+      // фильтры от ложных срабатываний на датах/телефонах/кодах:
+      if (isNaN(num)) continue;
+      // числа от 10 до 100 млн рублей; меньше — оставляем (могут быть мелкие долги)
+      if (num < 1 || num >= 1e11) continue;
+      // годы 1900-2099 как самостоятельная сумма допустимы — это могут быть мелкие долги.
+      // Фильтр сработает только если в контексте есть слово "год/г." сразу после числа.
+      // отбрасываем 11-значные (телефоны) и 12-значные (ИНН) без разделителей
+      if (/^\d{10,12}$/.test(numStr)) continue;
+      // отбрасываем дату формата dd.mm.yyyy
+      if (/^\d{1,2}\.\d{1,2}\.\d{2,4}$/.test(m[1])) continue;
+      // v5.1: если число похоже на фрагмент даты (например, "27.11" перед годом "2017"), отбрасываем
+      // Проверим, что в позиции +0..+30 нет паттерна "год + 4 цифры" — это значит мы вырезали кусок даты
+      const tail30 = text.slice(m.index + m[0].length, m.index + m[0].length + 6);
+      if (/^\.(?:19|20)\d{2}/.test(tail30)) continue;
+      // v5.1: для anchorless парсинга — фильтры:
+      //   - сумма < 50 ₽ нереально мала
+      //   - 6-значное число без копеек, за которым идёт запятая+область — это почтовый индекс
+      if (allowNoSuffix) {
+        if (num < 50) continue;
+        if (/^\d{6}$/.test(numStr)) {
+          const tailIdx = m.index + m[0].length;
+          const tail = text.slice(tailIdx, tailIdx + 30);
+          if (/^[\s,]+(?:росси|самарск|москов|петербург|ленинградск|свердловск|нижегородск|татарст|башкорт|воронежск|астраханск|саратовск|омск|новосибирск|краснодарск|ставропольск|алтайск|г\.|город|обл\.|область|край|респуб|улиц|просп|проезд)/i.test(tail)) continue;
+        }
+      }
+      // отбрасываем дубликаты позиции
+      if (out.some(o => o.start === m.index)) continue;
+      out.push({ value: num, start: m.index, end: m.index + m[0].length, hasSuffix: false });
+    }
+  }
+  return out;
+}
+
+function isFakeAmountContext(text, amtStart, amtEnd) {
+  const ctxStart = Math.max(0, amtStart - 25);
+  const ctxEnd = Math.min(text.length, amtEnd + 5);
+  const ctx = text.slice(ctxStart, ctxEnd);
+  return IP_FAKE_AMOUNT_CONTEXTS.some(re => re.test(ctx));
+}
+
+function detectIpStatus(windowText) {
+  for (const sp of IP_STATUS_PATTERNS) {
+    if (sp.re.test(windowText)) return { kind: sp.kind, label: sp.label };
+  }
+  return { kind: 'unknown', label: 'статус не определён' };
+}
+
+function detectDebtType(windowText) {
+  for (const dt of IP_DEBT_TYPES) {
+    if (dt.re.test(windowText)) return { kind: dt.kind, label: dt.label, weight: dt.weight };
+  }
+  // v7.1: не выдумываем тип («прочее»/«кредит»), если в строке нет явного признака.
+  // Раньше тип угадывался по широкому окну и «протекал» с соседних строк таблицы.
+  return { kind: 'unknown', label: 'не указан', weight: 1.0 };
+}
+
+function findIpAmount(normalizedText, ipPos, ipEnd, hardWinStart, hardWinEnd) {
+  const winStart = Math.max(hardWinStart != null ? hardWinStart : 0, ipPos - 350);
+  const winEnd = Math.min(hardWinEnd != null ? hardWinEnd : normalizedText.length, ipEnd + 500);
+  const win = normalizedText.slice(winStart, winEnd);
+
+  for (const anchorRe of IP_AMOUNT_ANCHORS) {
+    const anchorRegex = new RegExp(anchorRe.source, anchorRe.flags + 'g');
+    let am;
+    while ((am = anchorRegex.exec(win)) !== null) {
+      const tail = win.slice(am.index + am[0].length, am.index + am[0].length + 250);
+      const found = findAmountsInWindow(tail, true);  // v5.1: разрешаем без "руб."
+      found.sort((a, b) => a.start - b.start);
+      for (const amt of found) {
+        const absStart = winStart + am.index + am[0].length + amt.start;
+        const absEnd = absStart + (amt.end - amt.start);
+        if (!isFakeAmountContext(normalizedText, absStart, absEnd)) {
+          return { value: amt.value, source: 'anchor' };
+        }
+      }
+    }
+  }
+
+  const tightStart = Math.max(hardWinStart != null ? hardWinStart : 0, ipPos - 150);
+  const tight = normalizedText.slice(tightStart, Math.min(hardWinEnd != null ? hardWinEnd : normalizedText.length, ipEnd + 150));
+  const tightFound = findAmountsInWindow(tight);
+  let best = null, bestDist = Infinity;
+  for (const amt of tightFound) {
+    const absStart = tightStart + amt.start;
+    const absEnd = absStart + (amt.end - amt.start);
+    if (isFakeAmountContext(normalizedText, absStart, absEnd)) continue;
+    const dist = Math.min(Math.abs(absStart - ipEnd), Math.abs(ipPos - absEnd));
+    if (dist < bestDist) { bestDist = dist; best = { value: amt.value, source: 'nearest' }; }
+  }
+  return best;
+}
+
+function extractIPDebt(normalizedText) {
+  // Разрешаем пробелы внутри номера, разные тире, кириллицу/латиницу для И/П
+  const ipPattern = /(?:^|[^\d])(\d{3,7})\s*(?:[\/\\\.][\s\u00a0]*|[\s\u00a0]+)(\d{2})\s*(?:[\/\\\.][\s\u00a0]*|[\s\u00a0]+)(\d{4,7})[\s\u00a0]*[-\u2013\u2014][\s\u00a0]*[\u0438\u0418iI][\s\u00a0]*[\u043F\u041FpP](?![а-яёa-z])/g;
+  const occurrences = [];
+  let m, iter = 0;
+  while ((m = ipPattern.exec(normalizedText)) !== null && iter < 5000) {
+    iter++;
+    if (m[0].length === 0) { ipPattern.lastIndex++; continue; }
+    // m[0] может начинаться с не-цифры (lookahead-замена), берём чистый номер начиная с m[1]
+    const leadOffset = m[0].search(/\d/);
+    const rawNumber = m[0].slice(leadOffset);
+    const startPos = m.index + leadOffset;
+    const number = normalizeIpNumber(rawNumber);
+    occurrences.push({ number, pos: startPos, end: startPos + rawNumber.length });
+  }
+  if (occurrences.length === 0) return null;
+
+  const byNumber = new Map();
+  for (const occ of occurrences) {
+    if (!byNumber.has(occ.number)) {
+      byNumber.set(occ.number, { number: occ.number, firstPos: occ.pos, end: occ.end, occurrences: [] });
+    }
+    byNumber.get(occ.number).occurrences.push(occ);
+  }
+
+  let totalActiveSum = 0, totalAllSum = 0, activeCount = 0, closedCount = 0;
+  let hasAlimony = false;
+  const ips = [];
+
+  // v5: окна между ИП — режем посередине между моим и соседним номерами,
+  // чтобы текст между двумя ИП принадлежал ближайшему из них.
+  const positions = occurrences.map(o => o.pos).sort((a, b) => a - b);
+  function clampWindow(pos, end) {
+    let leftMid = 0, rightMid = normalizedText.length;
+    let prev = null;
+    for (const p of positions) {
+      if (p < pos) prev = p;
+      else if (p > pos) {
+        rightMid = Math.floor((end + p) / 2);
+        break;
+      }
+    }
+    if (prev !== null) leftMid = Math.floor((prev + pos) / 2);
+    return { start: Math.max(leftMid, pos - 600), end: Math.min(rightMid, end + 600) };
+  }
+
+  for (const entry of byNumber.values()) {
+    const { start: winStart, end: winEnd } = clampWindow(entry.firstPos, entry.end);
+    const windowText = normalizedText.slice(winStart, winEnd);
+
+    const status = detectIpStatus(windowText);
+    // v7.1: тип долга определяем по УЗКОМУ окну вокруг номера ИП (±180 символов,
+    // но не выходя за границы строки-окна), чтобы тип не «протекал» с соседних строк.
+    const dtWinStart = Math.max(winStart, entry.firstPos - 180);
+    const dtWinEnd = Math.min(winEnd, entry.end + 180);
+    const debtType = detectDebtType(normalizedText.slice(dtWinStart, dtWinEnd));
+    const amountInfo = findIpAmount(normalizedText, entry.firstPos, entry.end, winStart, winEnd);
+
+    const isActive = status.kind === 'active' || status.kind === 'unknown';
+    const isClosedPaid = status.kind === 'closed_paid' || status.kind === 'terminated';
+    if (isActive) activeCount++;
+    if (isClosedPaid || status.kind === 'closed_other' || status.kind === 'returned') closedCount++;
+    if (debtType.kind === 'alimony' && isActive) hasAlimony = true;
+
+    const amt = amountInfo ? amountInfo.value : null;
+    if (amt !== null) {
+      totalAllSum += amt;
+      if (!isClosedPaid) totalActiveSum += amt;
+    }
+
+    ips.push({
+      number: entry.number,
+      amount: amt,
+      amountSource: amountInfo ? amountInfo.source : null,
+      status: status.label,
+      statusKind: status.kind,
+      debtType: debtType.label,
+      debtKind: debtType.kind,
+      debtWeight: debtType.weight,
+      mentions: entry.occurrences.length
+    });
+  }
+
+  ips.sort((a, b) => {
+    const aActive = a.statusKind !== 'closed_paid' && a.statusKind !== 'terminated';
+    const bActive = b.statusKind !== 'closed_paid' && b.statusKind !== 'terminated';
+    if (aActive !== bActive) return aActive ? -1 : 1;
+    return (b.amount || 0) - (a.amount || 0);
+  });
+
+  return {
+    ips,
+    count: ips.length,
+    activeCount,
+    closedCount,
+    hasAlimony,
+    totalSum: totalActiveSum,
+    totalAllSum
+  };
+}
+
+// v5.3: SELECTIVE-обработка блока "Результаты скоринга".
+// Внутри блока строки категорий со значением 1 (чисто) ВЫРЕЗАЮТСЯ (заменяются пробелами),
+// чтобы они не давали ложных сигналов "преступление" в анализаторе.
+// Строки с значением < 1 (есть негатив) ОСТАВЛЯЮТСЯ — там реально что-то выявлено,
+// пусть остальные правила это поймают, и плюс мы добавим скор-надбавку отдельно.
+//
+// Также вырезается описание формата «Показатель оценивается от 0,00 до 1,00...» — это не сигнал.
+function stripScoringBlock(text) {
+  const startRe = /Результаты\s+скоринга/i;
+  const sm = text.match(startRe);
+  if (!sm) return text;
+  const startIdx = sm.index;
+  const tail = text.slice(startIdx);
+
+  // Находим границы блока (как раньше)
+  const endByProchee = tail.search(/Прочее\s+[01](?:[.,]\d+)?(?:\s|$)/i);
+  const endByHeader = tail.search(/\b(?:Доходы|Адреса|Открытые\s+данные|Негатив|Дополнительные|Связи|Родственники|Соцсети|УСТАНОВОЧНЫЕ)\b/i);
+  let endRel = -1;
+  if (endByProchee >= 0) {
+    const matchObj = tail.slice(endByProchee).match(/Прочее\s+[01](?:[.,]\d+)?(?:\s|$)/i);
+    endRel = endByProchee + (matchObj ? matchObj[0].length : 8);
+  }
+  if (endByHeader >= 0 && (endRel < 0 || endByHeader < endRel)) endRel = endByHeader;
+  if (endRel < 0) endRel = Math.min(1200, tail.length);
+
+  const blockStart = startIdx;
+  const blockEnd = startIdx + endRel;
+  let block = text.slice(blockStart, blockEnd);
+
+  // 1) Вырезаем заголовок и пояснение формата (не сигнал)
+  block = block.replace(/Результаты\s+скоринга/i,  m => ' '.repeat(m.length));
+  block = block.replace(/Общий\s+показатель[^а-яА-ЯёЁ]*[01](?:[.,]\d+)?\s*(?:[-–—]\s*[а-яё]+)?/i,
+                        m => ' '.repeat(m.length));
+  block = block.replace(/Показатель\s+оценивается[\s\S]*?негатива\./i,
+                        m => ' '.repeat(m.length));
+  block = block.replace(/(?:^|\s)Категории(?:\s|$)/i, m => ' '.repeat(m.length));
+
+  // 2) Для каждой строки категории решаем: вырезать (если =1) или оставить (если <1)
+  const CATEGORY_RE = /(Преступлени[а-яё]+\s+(?:против\s+[а-яё\s]+?|в\s+сфере\s+[а-яё\s]+?))(\s+)([01](?:[.,]\d+)?)/gi;
+  block = block.replace(CATEGORY_RE, (full, name, ws, val) => {
+    const num = parseFloat(val.replace(',', '.'));
+    if (!isNaN(num) && num >= 0.99) {
+      // "чисто" — вырезаем
+      return ' '.repeat(full.length);
+    }
+    // негатив — оставляем строку, чтобы анализатор её увидел
+    return full;
+  });
+  // Также строка "Прочее N" — вырезаем, если N=1
+  block = block.replace(/Прочее\s+([01](?:[.,]\d+)?)/gi, (full, val) => {
+    const num = parseFloat(val.replace(',', '.'));
+    if (!isNaN(num) && num >= 0.99) return ' '.repeat(full.length);
+    return full;
+  });
+
+  return text.slice(0, blockStart) + block + text.slice(blockEnd);
+}
+
+// v5.3: добавочный скоринг по категориям Himera со значением < 1
+function addHimeraCategoryRiskBonus(entry) {
+  if (!entry.himeraScore || !entry.himeraScore.categories || entry.himeraScore.categories.length === 0) return;
+  if (!entry.analysis || !entry.analysis.categories || !entry.analysis.categories.criminal) return;
+  const fssp = entry.analysis.categories.criminal;
+  let bonus = 0;
+  const flagged = [];
+  for (const cat of entry.himeraScore.categories) {
+    if (cat.value < 0.99) {
+      // Чем ниже значение — тем сильнее негатив. 1 - value = доля негатива.
+      bonus += Math.round((1 - cat.value) * 10);
+      flagged.push(cat.title + ' (' + cat.value.toFixed(2) + ')');
+    }
+  }
+  if (bonus > 0) {
+    fssp.score = Math.round((fssp.score + bonus) * 10) / 10;
+    fssp.himeraBonus = bonus;
+    fssp.himeraFlagged = flagged;
+    // пересчёт totalScore
+    let total = 0;
+    for (const c of Object.values(entry.analysis.categories)) total += c.score || 0;
+    entry.analysis.totalScore = Math.round(total * 10) / 10;
+    const rl = computeRiskLevel(entry.analysis.totalScore, entry.analysis.categoriesWithRisk, entry.analysis.docType);
+    Object.assign(entry.analysis, rl);
+  }
+}
+
+
+// v5.1: HimeraSearch — сводный показатель и категории
+function parseHimeraScore(rawText) {
+  if (!rawText) return null;
+  // v5.2: общий показатель ищем до строки «Показатель оценивается»
+const showHead = rawText.split(/Показатель\s+оценивается/i)[0] || rawText;
+const m = showHead.match(/общий\s+показатель\s*\n?\s*([01](?:[.,]\d{1,2})?)\s*(?:[-–—]\s*([а-яё]+))?/i);
+  if (!m) return null;
+  const score = parseFloat(m[1].replace(',', '.'));
+  if (isNaN(score)) return null;
+  const verdict = m[2] ? m[2].toLowerCase() : null;
+  // распознаём словесную оценку «плохо», «средне», «хорошо»
+  const cats = [];
+  const catRe = /(преступлени[а-яё]+\s+(?:против\s+[а-яёa-z\s]{3,40}?|в\s+сфере\s+[а-яёa-z\s]{3,40}?))\s{2,}([01](?:[.,]\d+)?)(?=\s|$)/gi;
+  let cm;
+  while ((cm = catRe.exec(rawText)) !== null && cats.length < 12) {
+    const v = parseFloat(cm[2].replace(',', '.'));
+    if (!isNaN(v)) cats.push({ title: cm[1].trim().replace(/\s+/g, ' '), value: v });
+  }
+  return { score, verdict, categories: cats };
+}
+
+async function analyzeEntry(entry) {
+  entry._cachedDetailHtml = null; // П.5: сброс кеша рендера при повторном анализе
+  const extraction = await extractTextFromPdf(entry.file, entry);
+  entry.pageTexts = extraction.pageTexts;
+  entry.pagesCount = extraction.pagesCount;
+  entry.rawText = extraction.fullText;
+
+  if (!entry.rawText.trim()) {
+    throw new Error('Не удалось извлечь текст (возможно, скан без OCR-слоя).');
+  }
+
+  // Normalize per page, concatenate; track page offsets in normalized space
+  let normalizedText = '';
+  for (let i = 0; i < entry.pageTexts.length; i++) {
+    const normPage = normalizeText(entry.pageTexts[i].text);
+    entry.pageTexts[i].normalizedText = normPage;
+    entry.pageTexts[i].normStart = normalizedText.length;
+    entry.pageTexts[i].normEnd = normalizedText.length + normPage.length;
+    normalizedText += normPage + '\n\n';
+  }
+  // v5.3: вырезаем Himera-блок "Результаты скоринга" — он содержит МЕТА-ИНФОРМАЦИЮ
+  // ("Преступление против личности 1" = "1.00 = хорошо/чисто"), но иначе попадает в анализ
+  // как множество фальшивых сигналов «преступление». Заменяем пробелами, чтобы не сдвинулись позиции.
+  normalizedText = stripScoringBlock(normalizedText);
+  entry.normalizedText = normalizedText;
+
+  // v5: сначала вычисляем субъекта, чтобы анализ матчей мог учитывать ФИО
+  entry.subjectInfo = extractSubjectInfo(entry.rawText || '', entry.pageTexts);
+  entry.himeraScore = parseHimeraScore(entry.rawText || '');
+
+  const analysis = analyzeText(normalizedText, entry.pagesCount, entry.pageTexts, entry.subjectInfo);
+  entry.analysis = analysis;
+
+  // Extract unique IPs with debt amounts
+  entry.ipDebt = extractIPDebt(normalizedText);
+
+  // v5: факт-ориентированный скоринг категории "ФССП"
+  // ВАЖНО: в v7 этот блок оставлен для совместимости (категория fssp по-прежнему имеет .score),
+  // но итоговый балл документа считается через computeScoreV7 ниже.
+  if (entry.ipDebt && entry.analysis && entry.analysis.categories && entry.analysis.categories.fssp) {
+    const ipd = entry.ipDebt;
+    const fssp = entry.analysis.categories.fssp;
+
+    let factScore = 0;
+    factScore += Math.min(15, 3 * ipd.activeCount);
+    if (ipd.totalSum > 5_000_000) factScore += 10;
+    else if (ipd.totalSum > 500_000) factScore += 6;
+    else if (ipd.totalSum > 100_000) factScore += 3;
+    if (ipd.hasAlimony) factScore += 5;
+
+    const activeMatches = fssp.matches.filter(m => !m.negated && !m.historical);
+    if (activeMatches.some(m => /запрет\s+выезда/i.test(m.keyword))) factScore += 5;
+    if (activeMatches.some(m => /арест/i.test(m.keyword))) factScore += 5;
+
+    fssp.score = Math.max(fssp.score, Math.round(factScore * 10) / 10);
+    fssp.factScore = factScore;
+    fssp.factSummary = {
+      activeCount: ipd.activeCount,
+      closedCount: ipd.closedCount,
+      totalSum: ipd.totalSum,
+      hasAlimony: ipd.hasAlimony
+    };
+  }
+
+  // v5.3: бонус к скорингу по категориям Himera со значением < 1
+  addHimeraCategoryRiskBonus(entry);
+
+  // ============================================================
+  // V7: ИТОГОВЫЙ СКОРИНГ 0–100 С ГЕЙТИНГОМ И BREAKDOWN
+  // ============================================================
+  const scoreResult = computeScoreV7(entry.analysis, entry.ipDebt, entry.himeraScore);
+  entry.analysis.totalScore = scoreResult.totalScore;
+  entry.analysis.riskLevel = scoreResult.riskLevel;
+  entry.analysis.riskLabel = scoreResult.riskLabel;
+  entry.analysis.riskMessage = scoreResult.riskMessage;
+  entry.analysis.scoreBreakdown = scoreResult;
+
+  // categoriesWithRisk пересчитываем по новой шкале (категории, давшие ≥2 балла)
+  entry.analysis.categoriesWithRisk = scoreResult.components.filter(c => c.score >= 2).length;
+}
+
+// ==========================================================================
+// PDF EXTRACTION с цветом, позициями, offset-ами (v4)
+// ==========================================================================
+async function extractTextFromPdf(file, entry) {
+  // v5.2: txt-файлы обрабатываем напрямую без PDF.js
+  if (/\.txt$/i.test(file.name) || file.type === 'text/plain') {
+    const text = await file.text();
+    const pageTexts = [{
+      pageNum: 1,
+      text: text,
+      items: [],
+      startOffset: 0,
+      endOffset: text.length
+    }];
+    return { pageTexts, fullText: text, pagesCount: 1 };
+  }
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  // Переиспользуем уже загруженный объект для PDF-модала (не создаём второй экземпляр)
+  if (entry) entry.pdfDocPromise = Promise.resolve(pdf);
+
+  const pageTexts = [];
+  let fullText = '';
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+
+    // Collect fill colors from operator list in order of text-producing ops
+    let colorsInOrder = [];
+    try {
+      const opList = await page.getOperatorList();
+      const OPS = pdfjsLib.OPS || {};
+      let currentColor = null;
+      for (let k = 0; k < opList.fnArray.length; k++) {
+        const fn = opList.fnArray[k];
+        const args = opList.argsArray[k];
+        if (fn === OPS.setFillRGBColor && args && args.length >= 3) {
+          let r = args[0], g = args[1], b = args[2];
+          if (r > 1 || g > 1 || b > 1) { r /= 255; g /= 255; b /= 255; }
+          currentColor = { r, g, b };
+        } else if (fn === OPS.setFillGray && args && args.length >= 1) {
+          const v = args[0] > 1 ? args[0] / 255 : args[0];
+          currentColor = { r: v, g: v, b: v };
+        } else if (fn === OPS.setFillCMYKColor && args && args.length >= 4) {
+          const c = args[0], m = args[1], y = args[2], k2 = args[3];
+          const r = (1 - c) * (1 - k2);
+          const g = (1 - m) * (1 - k2);
+          const b = (1 - y) * (1 - k2);
+          currentColor = { r, g, b };
+        } else if (fn === OPS.showText || fn === OPS.showSpacedText) {
+          colorsInOrder.push(currentColor);
+        }
+      }
+    } catch (e) {
+      // operator list may be unavailable; fallback to no color info
+    }
+
+    let pageText = '';
+    let items = [];
+    let lastY = null;
+    let textOpIdx = 0;
+    const pageStartOffset = fullText.length;
+
+    for (const item of content.items) {
+      const y = item.transform ? item.transform[5] : null;
+      if (lastY !== null && y !== null && Math.abs(y - lastY) > 2) {
+        pageText += '\n';
+      }
+      const charStart = pageText.length;
+      pageText += item.str;
+      const charEnd = pageText.length;
+
+      let color = 'unknown';
+      if (item.str && item.str.length > 0) {
+        const c = colorsInOrder[textOpIdx];
+        textOpIdx++;
+        if (c) {
+          const isRed = c.r > 0.6 && c.g < 0.3 && c.b < 0.3;
+          if (isRed) color = 'red';
+          else if (c.r === 0 && c.g === 0 && c.b === 0) color = 'black';
+          else color = 'other';
+        }
+      }
+
+      if (!item.str.endsWith(' ')) pageText += ' ';
+
+      items.push({
+        str: item.str,
+        x: item.transform ? item.transform[4] : 0,
+        y: item.transform ? item.transform[5] : 0,
+        width: item.width || 0,
+        height: item.height || 0,
+        charStart, charEnd,
+        color,
+        transform: item.transform
+      });
+      lastY = y;
+    }
+
+    pageTexts.push({
+      pageNum: i,
+      text: pageText,
+      items,
+      startOffset: pageStartOffset,
+      endOffset: pageStartOffset + pageText.length
+    });
+
+    fullText += pageText + '\n\n';
+  }
+
+  return { pageTexts, fullText, pagesCount: pdf.numPages };
+}
+
+// ==========================================================================
+// НОРМАЛИЗАЦИЯ
+// ==========================================================================
+function normalizeText(text) {
+  let t = text;
+  t = t.replace(/([а-яёa-z])[-–]\s*\n\s*([а-яёa-z])/gi, '$1$2');
+  t = t.replace(/\n+/g, ' ');
+  t = t.replace(/[\s\u00a0]+/g, ' ');
+  t = t.replace(/([а-яё])([А-ЯЁ])/g, '$1 $2');
+  t = t.replace(/([а-яёa-z])(\d)/gi, '$1 $2');
+  t = t.replace(/(\d)([а-яёa-z])/gi, '$1 $2');
+  t = t.replace(/[`´'']/g, "'");
+  t = t.replace(/[""«»]/g, '"');
+  return t.trim();
+}
+
+// ==========================================================================
+// locateMatch — нормализованная позиция → страница + bbox в PDF-координатах
+// ==========================================================================
+function locateMatch(pageTexts, position, matchedText) {
+  if (!pageTexts || pageTexts.length === 0) return null;
+  let pageEntry = null;
+  for (const p of pageTexts) {
+    if (position >= p.normStart && position < p.normEnd) { pageEntry = p; break; }
+  }
+  if (!pageEntry) return null;
+
+  const rawLower = pageEntry.text.toLowerCase().replace(/ё/g, 'е');
+  const needle = matchedText.toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim();
+  let rawIdx = rawLower.indexOf(needle);
+  if (rawIdx === -1) {
+    const firstWord = needle.split(/\s+/)[0];
+    if (firstWord && firstWord.length >= 3) rawIdx = rawLower.indexOf(firstWord);
+  }
+  if (rawIdx === -1) return { pageNum: pageEntry.pageNum, bbox: null };
+
+  const rawEnd = rawIdx + needle.length;
+  const hits = pageEntry.items.filter(it => it.charStart < rawEnd && it.charEnd > rawIdx);
+  if (hits.length === 0) return { pageNum: pageEntry.pageNum, bbox: null };
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const it of hits) {
+    const h = it.height || 10;
+    const x1 = it.x, y1 = it.y - h, x2 = it.x + (it.width || 0), y2 = it.y;
+    if (x1 < minX) minX = x1;
+    if (y1 < minY) minY = y1;
+    if (x2 > maxX) maxX = x2;
+    if (y2 > maxY) maxY = y2;
+  }
+  if (!isFinite(minX)) return { pageNum: pageEntry.pageNum, bbox: null };
+  return {
+    pageNum: pageEntry.pageNum,
+    bbox: { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
+  };
+}
+
+// ==========================================================================
+// АНАЛИЗ
+// ==========================================================================
+function analyzeText(normalizedText, pagesCount, pageTexts, subjectInfo) {
+  const textLower = normalizedText.toLowerCase();
+  const textForSearch = textLower.replace(/ё/g, 'е');
+
+  const docType = detectDocumentType(textForSearch);
+  const sentences = splitIntoSentences(normalizedText);
+
+  const categoriesResult = {};
+  let totalActive = 0, totalNegated = 0, totalHistorical = 0, totalScore = 0;
+
+  for (const [key, category] of Object.entries(RISK_CATEGORIES)) {
+    if (key === 'highlighted_red') continue;
+    const matches = findMatches(normalizedText, textForSearch, sentences, COMPILED_RULES[key] || [], pageTexts, subjectInfo);
+    const active = matches.filter(m => !m.negated && !m.historical);
+    const negated = matches.filter(m => m.negated);
+    const historical = matches.filter(m => m.historical && !m.negated);
+    const rawScore = active.reduce((s, m) => s + (m.weight * m.confidenceMultiplier), 0);
+    const categoryScore = Math.round(rawScore * 10) / 10;
+
+    categoriesResult[key] = {
+      key, title: category.title,
+      matches, active: active.length,
+      negated: negated.length, historical: historical.length,
+      score: categoryScore
+    };
+
+    totalActive += active.length;
+    totalNegated += negated.length;
+    totalHistorical += historical.length;
+    totalScore += categoryScore;
+  }
+
+  const redMatches = buildRedMatches(pageTexts);
+  categoriesResult.highlighted_red = {
+    key: 'highlighted_red', title: RISK_CATEGORIES.highlighted_red.title,
+    matches: redMatches,
+    active: redMatches.length, negated: 0, historical: 0,
+    score: Math.round(redMatches.reduce((s, m) => s + m.weight * m.confidenceMultiplier, 0) * 10) / 10
+  };
+  totalActive += redMatches.length;
+  totalScore += categoriesResult.highlighted_red.score;
+
+  markRedOverlap(categoriesResult, redMatches);
+
+  const extracted = extractStructuredData(normalizedText);
+  const categoriesWithRisk = Object.values(categoriesResult).filter(c => c.active > 0 && c.score >= 2).length;
+  const riskLevel = computeRiskLevel(totalScore, categoriesWithRisk, docType);
+
+  return {
+    docType,
+    categories: categoriesResult,
+    extracted,
+    totalActive, totalNegated, totalHistorical,
+    totalScore: Math.round(totalScore * 10) / 10,
+    categoriesWithRisk,
+    ...riskLevel
+  };
+}
+
+function buildRedMatches(pageTexts) {
+  const out = [];
+  if (!pageTexts) return out;
+  for (const page of pageTexts) {
+    const redItems = page.items.filter(it => it.color === 'red' && it.str && it.str.trim().length > 0);
+    if (redItems.length === 0) continue;
+    // Group contiguous red items on same line (y within 3) with gap < 20
+    const groups = [];
+    let cur = null;
+    for (const it of redItems) {
+      if (cur && Math.abs(cur._lastY - it.y) < 3 && (it.x - cur._lastRight) < 20) {
+        cur.items.push(it);
+        cur._lastY = it.y;
+        cur._lastRight = it.x + (it.width || 0);
+      } else {
+        if (cur) groups.push(cur);
+        cur = { items: [it], _lastY: it.y, _lastRight: it.x + (it.width || 0) };
+      }
+    }
+    if (cur) groups.push(cur);
+
+    for (const g of groups) {
+      const groupText = g.items.map(x => x.str).join('').trim();
+      if (groupText.length < 4) continue;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const it of g.items) {
+        const h = it.height || 10;
+        const x1 = it.x, y1 = it.y - h, x2 = it.x + (it.width || 0), y2 = it.y;
+        if (x1 < minX) minX = x1;
+        if (y1 < minY) minY = y1;
+        if (x2 > maxX) maxX = x2;
+        if (y2 > maxY) maxY = y2;
+      }
+      const bbox = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+      const firstStart = g.items[0].charStart;
+      const lastEnd = g.items[g.items.length - 1].charEnd;
+      const ctxStart = Math.max(0, firstStart - 80);
+      const ctxEnd = Math.min(page.text.length, lastEnd + 80);
+      out.push({
+        keyword: 'красный текст',
+        matchedText: groupText,
+        contextBefore: page.text.slice(ctxStart, firstStart),
+        contextAfter: page.text.slice(lastEnd, ctxEnd),
+        position: (page.normStart || 0),
+        pageNum: page.pageNum,
+        bbox,
+        weight: 2,
+        confidenceLevel: 'high',
+        confidenceMultiplier: 1,
+        negated: false,
+        historical: false,
+        sentence: ''
+      });
+    }
+  }
+  return out;
+}
+
+function bboxIntersect(a, b) {
+  if (!a || !b) return false;
+  return !(a.x + a.width < b.x || b.x + b.width < a.x || a.y + a.height < b.y || b.y + b.height < a.y);
+}
+
+function markRedOverlap(categoriesResult, redMatches) {
+  if (!redMatches || redMatches.length === 0) return;
+  for (const [key, cat] of Object.entries(categoriesResult)) {
+    if (key === 'highlighted_red') continue;
+    for (const m of cat.matches) {
+      if (!m.bbox || !m.pageNum) continue;
+      const hit = redMatches.find(r => r.pageNum === m.pageNum && bboxIntersect(r.bbox, m.bbox));
+      if (hit) {
+        m.redHighlighted = true;
+        m.confidenceMultiplier = (m.confidenceMultiplier || 1) * 1.5;
+      }
+    }
+    const active = cat.matches.filter(m => !m.negated && !m.historical);
+    const rawScore = active.reduce((s, m) => s + (m.weight * m.confidenceMultiplier), 0);
+    cat.score = Math.round(rawScore * 10) / 10;
+  }
+}
+
+// ==========================================================================
+// ПОИСК СОВПАДЕНИЙ
+// ==========================================================================
+function findMatches(normalizedText, textForSearch, sentences, rules, pageTexts, subjectInfo) {
+  const matches = [];
+
+  for (const rule of rules) {
+    if (!rule._regex) continue; // пропускаем правила с невалидным паттерном
+    // Клонируем regex (сбрасываем lastIndex, т.к. флаг g сохраняет состояние)
+    const regex = new RegExp(rule._regex.source, rule._regex.flags);
+
+    let m, iterations = 0;
+    const maxIterations = 10000;
+    while ((m = regex.exec(textForSearch)) !== null && iterations < maxIterations) {
+      iterations++;
+      if (m[0].length === 0) { regex.lastIndex++; continue; }
+
+      const idx = m.index;
+      const matchLen = m[0].length;
+      const matchedOriginal = normalizedText.slice(idx, idx + matchLen);
+
+      // Skip if the full word at match position is in the exclusion list
+      if (rule.skipWords && rule.skipWords.length > 0) {
+        const fullWord = getFullWordAt(normalizedText, idx, matchLen);
+        if (rule.skipWords.some(sw => fullWord.includes(sw))) continue;
+      }
+
+      const sentence = findContainingSentence(sentences, idx);
+
+      const contextStart = Math.max(0, idx - 100);
+      const contextEnd = Math.min(normalizedText.length, idx + matchLen + 100);
+      const contextBefore = normalizedText.slice(contextStart, idx);
+      const contextAfter = normalizedText.slice(idx + matchLen, contextEnd);
+
+      const negationResult = checkNegation(
+        sentence?.text || (contextBefore + matchedOriginal + contextAfter),
+        matchedOriginal,
+        idx - (sentence?.start || contextStart)
+      );
+
+      const historical = rule.historical === true;
+
+      let confidenceMultiplier = 1.0;
+      let confidenceLevel = 'high';
+      if (rule.weight === 1) { confidenceMultiplier = 0.5; confidenceLevel = 'low'; }
+      else if (rule.weight === 2) { confidenceLevel = 'medium'; }
+
+      const roleContext = checkRoleContext(sentence?.text || '', matchedOriginal);
+      if (roleContext) { confidenceMultiplier *= 0.3; confidenceLevel = 'low'; }
+
+      // v5: если в предложении упоминается ФИО, ОТЛИЧНАЯ от субъекта проверки — это контекст про третье лицо
+      if (subjectInfo && subjectInfo.fio && sentence && sentence.text) {
+        const sentText = sentence.text;
+        const otherFio = sentText.match(/[А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+){1,3}/g);
+        if (otherFio) {
+          const subjectLow = subjectInfo.fio.toLowerCase().replace(/ё/g, 'е');
+          const subjectParts = subjectLow.split(/\s+/);
+          const hasOtherPerson = otherFio.some(name => {
+            const nameLow = name.toLowerCase().replace(/ё/g, 'е');
+            // не совпадает с фио субъекта и не вложено в него
+            if (nameLow === subjectLow) return false;
+            // если каждое слово имени присутствует в субъекте — это варианты ФИО субъекта (Иванов → Иванов И.И.)
+            const nameParts = nameLow.split(/\s+/);
+            const overlap = nameParts.filter(p => subjectParts.includes(p)).length;
+            if (overlap >= Math.min(2, nameParts.length)) return false;
+            return isValidFio(name);
+          });
+          if (hasOtherPerson) {
+            confidenceMultiplier *= 0.3;
+            confidenceLevel = 'low';
+          }
+        }
+      }
+
+      // v4: citation filter
+      const preWindow = normalizedText.slice(Math.max(0, idx - 50), idx);
+      if (CITATION_PATTERN.test(preWindow)) {
+        confidenceMultiplier *= 0.3;
+      }
+
+      const match = {
+        keyword: rule.label,
+        matchedText: matchedOriginal,
+        contextBefore, contextAfter,
+        position: idx,
+        weight: rule.weight,
+        confidenceMultiplier, confidenceLevel,
+        negated: negationResult.negated,
+        negationReason: negationResult.reason,
+        historical,
+        sentence: sentence?.text || ''
+      };
+
+      if (pageTexts) {
+        const loc = locateMatch(pageTexts, idx, matchedOriginal);
+        if (loc) {
+          match.pageNum = loc.pageNum;
+          match.bbox = loc.bbox;
+        }
+      }
+
+      matches.push(match);
+    }
+  }
+
+  // v5: историческое — как модификатор активных матчей в том же предложении
+  const HISTORICAL_NEAR = /(погашен[а-яё]*|снят[а-яё]*|амнист[а-яё]*|реабилитир[а-яё]*|истёк\s+срок\s+давност|истек\s+срок\s+давност)/i;
+  for (const m of matches) {
+    if (m.negated || m.historical) continue;
+    const sent = m.sentence || '';
+    if (HISTORICAL_NEAR.test(sent)) {
+      m.confidenceMultiplier = (m.confidenceMultiplier || 1) * 0.2;
+      m.confidenceLevel = 'low';
+      m.historicalModified = true;
+    }
+  }
+  // v5: удаляем отдельные "historical" матчи, если в том же предложении есть активный матч той же категории
+  const sentencesWithActive = new Set();
+  for (const m of matches) {
+    if (!m.negated && !m.historical && m.sentence) sentencesWithActive.add(m.sentence);
+  }
+  const filtered = matches.filter(m => {
+    if (m.historical && !m.negated && m.sentence && sentencesWithActive.has(m.sentence)) return false;
+    return true;
+  });
+  return deduplicateMatchesByFact(filtered);
+}
+
+function checkNegation(sentenceText, matchedText, matchPosInSent) {
+  if (!sentenceText) return { negated: false, reason: null };
+  const sentLower = sentenceText.toLowerCase().replace(/ё/g, 'е');
+  const matchLower = matchedText.toLowerCase().replace(/ё/g, 'е');
+  const matchIdx = sentLower.indexOf(matchLower);
+  if (matchIdx === -1) return { negated: false, reason: null };
+  const matchEnd = matchIdx + matchLower.length;
+
+  for (const { postposition, regex: baseRegex } of COMPILED_NEGATIONS) {
+    if (!baseRegex) continue;
+    // Клонируем (сбрасываем lastIndex)
+    const regex = new RegExp(baseRegex.source, baseRegex.flags);
+
+    if (!postposition) {
+      // отрицание стоит ДО ключевого слова — ищем в начале предложения до match
+      const scope = sentLower.slice(0, matchEnd + 20);
+      regex.lastIndex = 0;
+      let nm;
+      while ((nm = regex.exec(scope)) !== null) {
+        if (nm.index >= matchIdx) break;  // отрицание после ключа — не наш случай
+        const between = scope.slice(nm.index + nm[0].length, matchIdx);
+        const wordsBetween = (between.match(/\S+/g) || []).length;
+        if (wordsBetween <= 12) {
+          return { negated: true, reason: nm[0].trim() };
+        }
+      }
+    } else {
+      // отрицание стоит ПОСЛЕ ключа — ищем после matchEnd в окне до 60 символов / 10 слов
+      const tailStart = matchEnd;
+      const tailEnd = Math.min(sentLower.length, matchEnd + 80);
+      const tail = sentLower.slice(tailStart, tailEnd);
+      regex.lastIndex = 0;
+      const nm = regex.exec(tail);
+      if (nm) {
+        const between = tail.slice(0, nm.index);
+        const wordsBetween = (between.match(/\S+/g) || []).length;
+        if (wordsBetween <= 10) {
+          return { negated: true, reason: '→ ' + nm[0].trim() };
+        }
+      }
+    }
+  }
+  return { negated: false, reason: null };
+}
+
+// v5: универсальный фильтр третьих ролей и подбор веса
+const THIRD_PARTY_ROLES = [
+  /\bсвидетел[ьяюеи]/i,
+  /\bпотерпевш[ийаяуеоиым]/i,
+  /\bистц[ауеомы]/i, /\bистец\b/i,
+  /\bответчик[ауеом]/i,
+  /\bпредставител[ьяюеи]/i,
+  /\bадвокат[ауеом]/i,
+  /\bсуд[ьяиюей]+\b(?!\s+(?:приговорил|постановил|решил|удовлетвор|вынес))/i,
+  /\bпрокурор[ауеом]/i,
+  /\bсекретар[ьяюеи]/i,
+  /\bэксперт[ауеом]/i,
+  /\bпонят[ыеыхо]/i,
+  /\bтреть[ие]\s+лиц/i,
+  /\bконтрагент[ауеом]/i
+];
+
+function checkRoleContext(sentenceText, matchedText) {
+  if (!sentenceText) return false;
+  const low = sentenceText.toLowerCase().replace(/ё/g, 'е');
+  const matchLow = matchedText.toLowerCase().replace(/ё/g, 'е');
+
+  // 1) старая логика: "должник" в договоре — это сторона, а не задолженность
+  if (/должник/.test(matchLow)) {
+    const markers = [
+      /\bименуем(ый|ая)\s+в\s+дальнейшем/i,
+      /\bсторон[аы]\s+договора/i,
+      /\bдоговор(а|у|ом)\s+(займ|кредит|поставк|купли)/i,
+      /\bкредитор/i
+    ];
+    if (markers.some(p => p.test(low))) return true;
+  }
+
+  // 2) v5: если в предложении явно фигурирует третья роль и нет нашего ключевого слова,
+  //    относящегося к субъекту проверки, — это сигнал об ослаблении
+  if (THIRD_PARTY_ROLES.some(r => r.test(low))) {
+    // только если "третья роль" находится близко к матчу
+    return true;
+  }
+
+  return false;
+}
+
+function getFullWordAt(text, start, len) {
+  let i = start;
+  while (i > 0 && /[а-яёa-zA-Z0-9]/i.test(text[i - 1])) i--;
+  let j = start + len;
+  while (j < text.length && /[а-яёa-zA-Z0-9]/i.test(text[j])) j++;
+  return text.slice(i, j).toLowerCase().replace(/ё/g, 'е');
+}
+
+function deduplicateMatchesByFact(matches) {
+  matches.sort((a, b) => a.position - b.position);
+  const result = [];
+  for (const m of matches) {
+    // считаем "один факт" — если в том же предложении уже есть совпадение с близким весом и тем же label-корнем
+    const sameLabel = result.find(r =>
+      Math.abs(r.position - m.position) < 15 && r.keyword === m.keyword
+    );
+    if (sameLabel) {
+      if (m.weight > sameLabel.weight) {
+        const idx = result.indexOf(sameLabel);
+        result[idx] = m;
+      }
+      continue;
+    }
+    // событие в одном предложении — оставляем только сильнейшее с тем же label
+    const sameSentence = result.find(r =>
+      r.sentence && m.sentence && r.sentence === m.sentence && r.keyword === m.keyword
+    );
+    if (sameSentence) {
+      if (m.weight * (m.confidenceMultiplier || 1) > sameSentence.weight * (sameSentence.confidenceMultiplier || 1)) {
+        const idx = result.indexOf(sameSentence);
+        result[idx] = m;
+      }
+      continue;
+    }
+    result.push(m);
+  }
+  return result;
+}
+
+
+function findContainingSentence(sentences, position) {
+  for (const s of sentences) {
+    if (position >= s.start && position < s.end) return s;
+  }
+  return null;
+}
+
+function splitIntoSentences(text) {
+  const abbrev = /\b(т\.\s*[едкнп]|г\.|ст\.|ч\.|п\.|руб\.|тыс\.|млн\.|млрд\.|др\.|ук|коап)\s*$/i;
+  const sentences = [];
+  let current = '';
+  let cursor = 0;
+  // П.7: итерируем по индексам без Array.from (быстрее для больших текстов)
+  for (let i = 0, len = text.length; i < len; i++) {
+    const ch = text[i];
+    current += ch;
+    const code = text.charCodeAt(i);
+    // . ! ? ;
+    if (code === 46 || code === 33 || code === 63 || code === 59) {
+      const nextCh = text[i + 1] || ' ';
+      if (!abbrev.test(current) && (nextCh === ' ' || nextCh === '\n' || i + 1 >= len)) {
+        sentences.push({ text: current.trim(), start: cursor, end: cursor + current.length });
+        cursor += current.length;
+        current = '';
+      }
+    }
+  }
+  if (current.trim()) {
+    sentences.push({ text: current.trim(), start: cursor, end: cursor + current.length });
+  }
+  return sentences;
+}
+
+function detectDocumentType(textLower) {
+  for (const docType of DOCUMENT_TYPES) {
+    try {
+      const re = new RegExp(docType.pattern, 'i');
+      if (re.test(textLower)) return docType;
+    } catch (e) { /* ignore */ }
+  }
+  return null;
+}
+
+function extractStructuredData(text) {
+  const result = {};
+  for (const [key, extractor] of Object.entries(EXTRACTORS)) {
+    const pattern = new RegExp(extractor.pattern.source, extractor.pattern.flags);
+    const seen = new Set();
+    const items = [];
+    let m;
+    while ((m = pattern.exec(text)) !== null) {
+      if (m[0].length === 0) { pattern.lastIndex++; continue; }
+      const value = extractor.format(m);
+      if (value == null) continue;
+      const normalizedValue = value.replace(/\s+/g, ' ').trim();
+      if (extractor.validate) {
+        const digits = (m[1] || m[0]).replace(/\D/g, '');
+        if (!extractor.validate(digits)) continue;
+      }
+      if (!seen.has(normalizedValue.toLowerCase())) {
+        seen.add(normalizedValue.toLowerCase());
+        items.push(normalizedValue);
+      }
+    }
+    if (items.length > 0) {
+      result[key] = { label: extractor.label, items: items.slice(0, 30) };
+    }
+  }
+  return result;
+}
+
+// ==========================================================================
+// V7: СКОРИНГ 0–100 С ГЕЙТИНГОМ ПО ФАКТАМ
+// ==========================================================================
+// Балл строится из компонентов с потолками. Если в документе нет ни одного
+// "явного факта" — балл ограничен 20 (умеренный максимум). При наличии
+// явных фактов работает полный бюджет по категориям.
+//
+// Иерархия драйверов: уголовка > ФССП > банкротство > Himera > остальное.
+// ==========================================================================
+
+const SCORE_CONFIG_V7 = {
+  // Потолки компонентов по категориям
+  caps: {
+    criminal:      60,  // главный драйвер
+    fssp:          25,
+    bankruptcy:    15,
+    himera:        10,
+    credit:         8,
+    tax_debts:      5,
+    discipline:     5,
+    affiliation:    3,
+    other:          3   // все прочие категории суммарно
+  },
+  // Лимит безфактического режима
+  noFactsCap: 20,
+  // Пороги уровней риска
+  thresholds: {
+    low:      20,  // 0–20
+    moderate: 40,  // 21–40
+    high:     70,  // 41–70
+    // 71–100 → critical
+  },
+  // Список тяжких статей УК для бонуса
+  heavyUkArticles: ['105', '111', '131', '132', '162', '228.1'],
+  // Триггеры явных фактов уголовки в матчах (по label)
+  criminalFactLabels: [
+    'судим', 'судимость', 'осуждён', 'осуждается', 'приговор', 'приговорён',
+    'обвинительный приговор', 'вынесен приговор',
+    'уголовное дело', 'уголовное преследование', 'уголовное наказание',
+    'уголовная ответственность', 'возбуждение уголовного дела',
+    'лишение свободы', 'отбывает наказание', 'места лишения свободы',
+    'исправительная колония', 'колония режима',
+    'обвиняемый', 'подсудимый', 'подозреваемый',
+    'предъявлено обвинение', 'привлечён к уг. отв.', 'привлекался к уг. отв.',
+    'признан виновным', 'виновен в совершении'
+  ],
+  imprisonmentLabels: [
+    'лишение свободы', 'отбывает наказание', 'места лишения свободы',
+    'исправительная колония', 'колония режима', 'строгий режим',
+    'особый режим', 'общий режим', 'СИЗО', 'следственный изолятор'
+  ],
+  currentProcessLabels: ['обвиняемый', 'подсудимый', 'подозреваемый']
+};
+
+// --------------------------------------------------------------------------
+// Определение явных фактов в документе
+// --------------------------------------------------------------------------
+function detectExplicitFacts(analysis, ipDebt, himeraScore) {
+  const facts = [];
+
+  // 1) Приговор суда — самый сильный документальный факт
+  if (analysis.docType && analysis.docType.id === 'court_verdict') {
+    facts.push({ kind: 'court_verdict', label: 'Документ — приговор суда' });
+  }
+
+  // 2) Справка о судимости (МВД) со словарными матчами criminal weight=3
+  if (analysis.docType &&
+      (analysis.docType.id === 'criminal_certificate_2' || analysis.docType.id === 'criminal_certificate')) {
+    const crim = analysis.categories.criminal;
+    if (crim && crim.matches.some(m => !m.negated && !m.historical && m.weight === 3)) {
+      facts.push({ kind: 'mvd_certificate_positive', label: 'Справка ИЦ МВД с записями' });
+    }
+  }
+
+  // 3) Активный матч уголовки с весом 3 (судимость/осуждён/приговор и т.п.)
+  const crim = analysis.categories.criminal;
+  if (crim) {
+    const strongActive = crim.matches.filter(m =>
+      !m.negated && !m.historical && m.weight === 3 &&
+      SCORE_CONFIG_V7.criminalFactLabels.some(lbl => m.keyword === lbl || m.keyword.includes(lbl))
+    );
+    if (strongActive.length > 0) {
+      facts.push({
+        kind: 'criminal_active_match',
+        label: `Уголовка: активный матч (${strongActive[0].keyword})`,
+        count: strongActive.length
+      });
+    }
+  }
+
+  // 4) Активные ИП в ФССП
+  if (ipDebt && ipDebt.activeCount > 0) {
+    facts.push({
+      kind: 'fssp_active_ip',
+      label: `ФССП: ${ipDebt.activeCount} активных ИП`,
+      count: ipDebt.activeCount,
+      sum: ipDebt.totalSum
+    });
+  }
+
+  // 5) Himera общий показатель < 0.5
+  if (himeraScore && typeof himeraScore.value === 'number' && himeraScore.value < 0.5) {
+    facts.push({
+      kind: 'himera_low_score',
+      label: `Himera: общий показатель ${himeraScore.value.toFixed(2)}`,
+      value: himeraScore.value
+    });
+  }
+
+  // 6) Банкротство — словарные сильные матчи
+  const bankr = analysis.categories.bankruptcy;
+  if (bankr) {
+    const strongBankr = bankr.matches.filter(m => !m.negated && !m.historical && m.weight >= 2);
+    if (strongBankr.length > 0) {
+      facts.push({
+        kind: 'bankruptcy_strong',
+        label: `Банкротство: ${strongBankr.length} активн. матчей`,
+        count: strongBankr.length
+      });
+    }
+  }
+
+  return facts;
+}
+
+// --------------------------------------------------------------------------
+// Компонент уголовки: словарь до 40 + бонусы за факты до 20 (потолок 60)
+// --------------------------------------------------------------------------
+function computeCriminalComponent(analysis) {
+  const cat = analysis.categories.criminal;
+  if (!cat) return { score: 0, breakdown: [] };
+
+  const active = cat.matches.filter(m => !m.negated && !m.historical);
+  if (active.length === 0) return { score: 0, breakdown: [] };
+
+  // База — сумма weight × confidenceMultiplier, ограничена 40
+  const rawDict = active.reduce((s, m) => s + (m.weight * m.confidenceMultiplier), 0);
+  const dictScore = Math.min(40, Math.round(rawDict * 10) / 10);
+
+  const breakdown = [];
+  if (dictScore > 0) {
+    breakdown.push({
+      label: `Словарь уголовки (${active.length} активн. матчей)`,
+      value: dictScore
+    });
+  }
+
+  // Бонусы за факты
+  let bonus = 0;
+
+  if (analysis.docType && analysis.docType.id === 'court_verdict') {
+    bonus += 15;
+    breakdown.push({ label: 'Документ — приговор суда', value: 15 });
+  }
+
+  const hasImprisonment = active.some(m =>
+    SCORE_CONFIG_V7.imprisonmentLabels.some(lbl => m.keyword === lbl || m.keyword.includes(lbl))
+  );
+  if (hasImprisonment) {
+    bonus += 8;
+    breakdown.push({ label: 'Лишение свободы / колония / отбывает наказание', value: 8 });
+  }
+
+  const hasCurrentProcess = active.some(m =>
+    SCORE_CONFIG_V7.currentProcessLabels.some(lbl => m.keyword === lbl)
+  );
+  if (hasCurrentProcess) {
+    bonus += 5;
+    breakdown.push({ label: 'Текущий процесс: обвиняемый/подсудимый', value: 5 });
+  }
+
+  // Тяжкие статьи УК — ищем в extracted.articlesUK
+  const ukItems = (analysis.extracted && analysis.extracted.articlesUK)
+    ? analysis.extracted.articlesUK.items : [];
+  const hasHeavy = ukItems.some(s =>
+    SCORE_CONFIG_V7.heavyUkArticles.some(num => s.includes('ст. ' + num + ' '))
+  );
+  if (hasHeavy) {
+    bonus += 5;
+    breakdown.push({ label: 'Тяжкая статья УК (105/111/131/132/162/228.1)', value: 5 });
+  }
+
+  bonus = Math.min(30, bonus);
+
+  const total = Math.min(SCORE_CONFIG_V7.caps.criminal, dictScore + bonus);
+  return { score: total, breakdown, dictScore, bonus };
+}
+
+// --------------------------------------------------------------------------
+// Компонент ФССП: факт-ориентированно (потолок 25)
+// --------------------------------------------------------------------------
+function computeFsspComponent(analysis, ipDebt) {
+  const breakdown = [];
+  let score = 0;
+
+  // 1) Базовый компонент — активные ИП
+  if (ipDebt && ipDebt.activeCount > 0) {
+    const ipScore = Math.min(12, 3 * ipDebt.activeCount);
+    score += ipScore;
+    breakdown.push({
+      label: `Активных ИП: ${ipDebt.activeCount}`,
+      value: ipScore
+    });
+
+    // 2) Сумма активного долга
+    const sum = ipDebt.totalSum;
+    let sumScore = 0;
+    let sumLabel = '';
+    if (sum > 5_000_000)   { sumScore = 12; sumLabel = `Сумма долга > 5 млн ₽`; }
+    else if (sum > 1_000_000){ sumScore = 9; sumLabel = `Сумма долга > 1 млн ₽`; }
+    else if (sum > 500_000){ sumScore = 7;  sumLabel = `Сумма долга > 500k ₽`; }
+    else if (sum > 100_000){ sumScore = 5;  sumLabel = `Сумма долга > 100k ₽`; }
+    else if (sum > 10_000) { sumScore = 3;  sumLabel = `Сумма долга > 10k ₽`; }
+    else if (sum > 1000)   { sumScore = 1;  sumLabel = `Сумма долга < 10k ₽`; }
+    if (sumScore > 0) {
+      score += sumScore;
+      breakdown.push({ label: sumLabel, value: sumScore });
+    }
+
+    // 3) Алименты — серьёзный социальный сигнал
+    if (ipDebt.hasAlimony) {
+      score += 8;
+      breakdown.push({ label: 'Активное взыскание алиментов', value: 8 });
+    }
+  }
+
+  // 4) Запрет выезда / арест имущества — из матчей категории fssp
+  const fsspCat = analysis.categories.fssp;
+  if (fsspCat) {
+    const active = fsspCat.matches.filter(m => !m.negated && !m.historical);
+    const hasTravelBan = active.some(m => /запрет\s+выезда|выезд[а-я]*\s+за\s+границ/i.test(m.keyword));
+    const hasArrest = active.some(m => /арест/i.test(m.keyword));
+    if (hasTravelBan) {
+      score += 4;
+      breakdown.push({ label: 'Запрет выезда', value: 4 });
+    }
+    if (hasArrest) {
+      score += 4;
+      breakdown.push({ label: 'Арест имущества/счетов', value: 4 });
+    }
+  }
+
+  score = Math.min(SCORE_CONFIG_V7.caps.fssp, score);
+  return { score, breakdown };
+}
+
+// --------------------------------------------------------------------------
+// Простой компонент по категории — словарь с потолком
+// --------------------------------------------------------------------------
+function computeSimpleComponent(category, cap, label) {
+  if (!category) return { score: 0, breakdown: [] };
+  const active = category.matches.filter(m => !m.negated && !m.historical);
+  if (active.length === 0) return { score: 0, breakdown: [] };
+  const raw = active.reduce((s, m) => s + (m.weight * m.confidenceMultiplier), 0);
+  const score = Math.min(cap, Math.round(raw * 10) / 10);
+  if (score < 0.5) return { score: 0, breakdown: [] };
+  return {
+    score,
+    breakdown: [{ label: `${label} (${active.length} активн.)`, value: score }]
+  };
+}
+
+// --------------------------------------------------------------------------
+// Компонент Himera — отдельно, по результатам скоринга документа
+// --------------------------------------------------------------------------
+function computeHimeraComponent(himeraScore) {
+  if (!himeraScore || typeof himeraScore.value !== 'number') {
+    return { score: 0, breakdown: [] };
+  }
+  const v = himeraScore.value;
+  let score = 0;
+  let label = '';
+  if (v < 0.3)      { score = 10; label = `Himera ${v.toFixed(2)} — критический`; }
+  else if (v < 0.5) { score = 7;  label = `Himera ${v.toFixed(2)} — низкий`; }
+  else if (v < 0.7) { score = 4;  label = `Himera ${v.toFixed(2)} — средний`; }
+  else if (v < 0.85){ score = 2;  label = `Himera ${v.toFixed(2)} — пограничный`; }
+  if (score === 0) return { score: 0, breakdown: [] };
+  return { score, breakdown: [{ label, value: score }] };
+}
+
+// --------------------------------------------------------------------------
+// Надбавки/штрафы за уверенность
+// --------------------------------------------------------------------------
+function computeConfidenceAdjustments(analysis, ipDebt, hasExplicitFacts) {
+  const adjustments = [];
+
+  // Красная пометка на ключевом матче (criminal или fssp с весом 3)
+  const crim = analysis.categories.criminal;
+  const fssp = analysis.categories.fssp;
+  let redOnKey = false;
+  for (const cat of [crim, fssp]) {
+    if (!cat) continue;
+    if (cat.matches.some(m => m.redHighlighted && !m.negated && !m.historical && m.weight === 3)) {
+      redOnKey = true;
+      break;
+    }
+  }
+  if (redOnKey) {
+    adjustments.push({ label: '+ Красная пометка на ключевом матче', value: +5 });
+  }
+
+  // Документ — официальная справка
+  const officialDocs = new Set([
+    'criminal_certificate', 'criminal_certificate_2',
+    'fssp_certificate', 'fssp_decision',
+    'tax_statement', 'bankruptcy_registry'
+  ]);
+  if (analysis.docType && officialDocs.has(analysis.docType.id)) {
+    adjustments.push({ label: '+ Официальный документ-источник', value: +2 });
+  }
+
+  // Все criminal-матчи отрицаны — штраф
+  if (crim) {
+    const activeC = crim.matches.filter(m => !m.negated && !m.historical);
+    const negatedC = crim.matches.filter(m => m.negated);
+    if (activeC.length === 0 && negatedC.length > 0) {
+      adjustments.push({ label: '− Все упоминания уголовки отрицаны', value: -5 });
+    }
+  }
+
+  // Справка о несудимости и criminal пуст
+  if (analysis.docType && analysis.docType.id === 'criminal_certificate') {
+    const crimActive = crim ? crim.matches.filter(m => !m.negated && !m.historical).length : 0;
+    if (crimActive === 0) {
+      adjustments.push({ label: '− Справка о несудимости, чисто', value: -10 });
+    }
+  }
+
+  return adjustments;
+}
+
+// --------------------------------------------------------------------------
+// ГЛАВНАЯ ФУНКЦИЯ: считает итоговый балл и breakdown
+// --------------------------------------------------------------------------
+function computeScoreV7(analysis, ipDebt, himeraScore) {
+  const facts = detectExplicitFacts(analysis, ipDebt, himeraScore);
+  const hasExplicitFacts = facts.length > 0;
+
+  const components = [];
+
+  // Уголовка
+  const crimComp = computeCriminalComponent(analysis);
+  if (crimComp.score > 0) {
+    components.push({ key: 'criminal', title: 'Уголовка', ...crimComp });
+  }
+
+  // ФССП
+  const fsspComp = computeFsspComponent(analysis, ipDebt);
+  if (fsspComp.score > 0) {
+    components.push({ key: 'fssp', title: 'ФССП', ...fsspComp });
+  }
+
+  // Банкротство
+  const bankrComp = computeSimpleComponent(
+    analysis.categories.bankruptcy, SCORE_CONFIG_V7.caps.bankruptcy, 'Банкротство'
+  );
+  if (bankrComp.score > 0) {
+    components.push({ key: 'bankruptcy', title: 'Банкротство', ...bankrComp });
+  }
+
+  // Himera
+  const himComp = computeHimeraComponent(himeraScore);
+  if (himComp.score > 0) {
+    components.push({ key: 'himera', title: 'Himera-скоринг', ...himComp });
+  }
+
+  // Остальные категории — суммарно, с потолками
+  const otherCategories = [
+    { key: 'credit',      cap: SCORE_CONFIG_V7.caps.credit,      title: 'Кредитные риски' },
+    { key: 'tax_debts',   cap: SCORE_CONFIG_V7.caps.tax_debts,   title: 'Налоги и долги' },
+    { key: 'discipline',  cap: SCORE_CONFIG_V7.caps.discipline,  title: 'Дисциплина' },
+    { key: 'affiliation', cap: SCORE_CONFIG_V7.caps.affiliation, title: 'Связи/аффилированность' }
+  ];
+  for (const oc of otherCategories) {
+    const comp = computeSimpleComponent(analysis.categories[oc.key], oc.cap, oc.title);
+    if (comp.score > 0) {
+      components.push({ key: oc.key, title: oc.title, ...comp });
+    }
+  }
+
+  // Highlighted red и прочие категории, которые не в списке выше — суммарно до 3
+  const knownKeys = new Set(['criminal', 'fssp', 'bankruptcy', 'credit', 'tax_debts', 'discipline', 'affiliation']);
+  let otherRaw = 0;
+  let otherCount = 0;
+  for (const [key, cat] of Object.entries(analysis.categories)) {
+    if (knownKeys.has(key)) continue;
+    if (key === 'highlighted_red') continue; // обрабатывается через redHighlighted-надбавку
+    const active = cat.matches.filter(m => !m.negated && !m.historical);
+    if (active.length === 0) continue;
+    otherRaw += active.reduce((s, m) => s + (m.weight * m.confidenceMultiplier), 0);
+    otherCount += active.length;
+  }
+  if (otherRaw > 0) {
+    const otherScore = Math.min(SCORE_CONFIG_V7.caps.other, Math.round(otherRaw * 10) / 10);
+    if (otherScore >= 0.5) {
+      components.push({
+        key: 'other',
+        title: 'Прочие сигналы',
+        score: otherScore,
+        breakdown: [{ label: `Прочие категории (${otherCount} матчей)`, value: otherScore }]
+      });
+    }
+  }
+
+  // Сумма компонентов
+  let rawSum = components.reduce((s, c) => s + c.score, 0);
+
+  // Надбавки/штрафы
+  const adjustments = computeConfidenceAdjustments(analysis, ipDebt, hasExplicitFacts);
+  const adjustSum = adjustments.reduce((s, a) => s + a.value, 0);
+
+  // Гейт: без явных фактов — потолок 20
+  let totalScore = rawSum + adjustSum;
+  let gated = false;
+  if (!hasExplicitFacts && totalScore > SCORE_CONFIG_V7.noFactsCap) {
+    totalScore = SCORE_CONFIG_V7.noFactsCap;
+    gated = true;
+  }
+  // Clamp в [0, 100]
+  totalScore = Math.max(0, Math.min(100, Math.round(totalScore)));
+
+  // Уровень риска
+  const t = SCORE_CONFIG_V7.thresholds;
+  let riskLevel, riskLabel;
+  if (totalScore <= t.low) { riskLevel = 'low'; riskLabel = 'Низкий риск'; }
+  else if (totalScore <= t.moderate) { riskLevel = 'medium'; riskLabel = 'Умеренный риск'; }
+  else if (totalScore <= t.high) { riskLevel = 'high'; riskLabel = 'Высокий риск'; }
+  else { riskLevel = 'high'; riskLabel = 'Критический риск'; }
+
+  // Сообщение
+  let riskMessage;
+  if (totalScore === 0) {
+    riskMessage = 'Сигналов риска не обнаружено.';
+  } else if (gated) {
+    riskMessage = `Явных фактов не обнаружено. Балл ограничен ${SCORE_CONFIG_V7.noFactsCap} (фоновые сигналы).`;
+  } else if (hasExplicitFacts) {
+    const factSummary = facts.slice(0, 3).map(f => f.label).join('; ');
+    riskMessage = `Обнаружены явные факты: ${factSummary}${facts.length > 3 ? '…' : '.'}`;
+  } else {
+    riskMessage = `Балл ${totalScore} по фоновым сигналам.`;
+  }
+
+  return {
+    totalScore,
+    riskLevel,
+    riskLabel,
+    riskMessage,
+    components,
+    adjustments,
+    facts,
+    hasExplicitFacts,
+    gated,
+    rawSum: Math.round(rawSum * 10) / 10,
+    adjustSum
+  };
+}
+
+function computeRiskLevel(totalScore, categoriesWithRisk, docType) {
+  // Legacy-обёртка для совместимости со старыми вызовами.
+  // Возвращает только базовые поля, без breakdown (тот считается отдельно через computeScoreV7).
+  const t = SCORE_CONFIG_V7.thresholds;
+  let riskLevel, riskLabel;
+  const s = totalScore;
+  if (s <= t.low) { riskLevel = 'low'; riskLabel = 'Низкий риск'; }
+  else if (s <= t.moderate) { riskLevel = 'medium'; riskLabel = 'Умеренный риск'; }
+  else if (s <= t.high) { riskLevel = 'high'; riskLabel = 'Высокий риск'; }
+  else { riskLevel = 'high'; riskLabel = 'Критический риск'; }
+  return { riskLevel, riskLabel, riskMessage: `Балл ${s} / 100.` };
+}
+
+// ==========================================================================
+// BATCH SUMMARY
+// ==========================================================================
+function renderBatchSummary() {
+  const done = allAnalyses.filter(e => e.status === 'done' && e.analysis);
+  const errored = allAnalyses.filter(e => e.status === 'error');
+  const critical = done.filter(e => e.analysis.totalScore > 70).length;
+  const high = done.filter(e => e.analysis.riskLevel === 'high' && e.analysis.totalScore <= 70).length;
+  const med = done.filter(e => e.analysis.riskLevel === 'medium').length;
+  const low = done.filter(e => e.analysis.riskLevel === 'low').length;
+
+  let html = `<div class="batch-summary">`;
+  html += `<div class="batch-summary-head">Результаты пакетного анализа
+    <span class="bs-counter">${allAnalyses.length} файл(ов)</span>
+    ${critical > 0 ? `<span class="bs-pill high">${critical} критич.</span>` : ''}
+    <span class="bs-pill high">${high} высок.</span>
+    <span class="bs-pill medium">${med} умерен.</span>
+    <span class="bs-pill low">${low} низк.</span>
+    ${errored.length > 0 ? `<span class="bs-pill high">${errored.length} с ошибкой</span>` : ''}
+  </div>`;
+  // v5: расширенная шапка — ДР + Долг ФССП
+  html += `<div style="margin: 6px 0 14px; display: flex; gap: 8px; flex-wrap: wrap;">
+    <button class="btn btn-ghost" id="exportCsvBtn" style="padding: 8px 14px; font-size: 12px;">📥 Экспорт CSV</button>
+    <span id="subjectGroupingNote" style="color:var(--text-dim); font-size:12px; align-self:center;"></span>
+  </div>`;
+  html += `<table><thead><tr>
+    <th>№</th><th>Субъект</th><th>ДР</th><th>Тип документа</th><th>Риск</th>
+    <th>Балл</th><th>Долг ФССП ₽</th><th>Топ-3 категории</th><th></th>
+  </tr></thead><tbody>`;
+
+  allAnalyses.forEach((entry, idx) => {
+    if (entry.status === 'error' || !entry.analysis) {
+      const errSubj = entry.subjectInfo;
+      const errTitle = errSubj && errSubj.fio ? escapeHtml(errSubj.fio) + (errSubj.dob ? ` <span style="color:var(--text-dim);font-size:11px;">${escapeHtml(errSubj.dob)}</span>` : '') : escapeHtml(entry.name);
+      html += `<tr class="summary-row" data-idx="${idx}">
+        <td>${idx + 1}</td>
+        <td class="sr-name">${errTitle}</td>
+        <td>—</td>
+        <td class="sr-doctype">—</td>
+        <td><span class="risk-badge high">● ошибка</span></td>
+        <td colspan="3" style="color:var(--danger); font-size:12px;">${escapeHtml(entry.error || 'ошибка анализа')}</td>
+        <td></td>
+      </tr>`;
+      html += `<tr class="summary-detail-row" id="detailRow-${idx}" style="display:none;"><td colspan="9"><div class="summary-detail-cell" id="detailCell-${idx}"></div></td></tr>`;
+      return;
+    }
+    const a = entry.analysis;
+    const top3 = Object.values(a.categories)
+      .filter(c => c.active > 0)
+      .sort((x, y) => y.score - x.score)
+      .slice(0, 3)
+      .map(c => c.title)
+      .join(' · ') || '—';
+
+    const subj = entry.subjectInfo;
+    const displayName = subj && subj.fio ? escapeHtml(subj.fio) : `<span style="color:var(--text-dim); font-style:italic;">${escapeHtml(entry.name)}</span>`;
+    const ageStr = subj && subj.age != null ? ` <span style="color:var(--text-dim);">(${subj.age})</span>` : '';
+    const dobStr = subj && subj.dob ? `${escapeHtml(subj.dob)}${ageStr}` : '<span style="color:var(--text-dim);">—</span>';
+
+    const debt = entry.ipDebt ? entry.ipDebt.totalSum : 0;
+    const debtFmt = debt > 0
+      ? `<span style="color:var(--warning);font-weight:600;">${debt.toLocaleString('ru-RU', { maximumFractionDigits: 0 })}</span>`
+      : '<span style="color:var(--text-dim);">—</span>';
+    const alimonyMark = entry.ipDebt && entry.ipDebt.hasAlimony ? ' <span title="алименты" style="color:var(--danger);">⚠</span>' : '';
+
+    const scoreColorClass = a.riskLevel === 'high' ? 'danger' :
+                            a.riskLevel === 'medium' ? 'warning' : 'success';
+    html += `<tr class="summary-row" data-idx="${idx}">
+      <td>${idx + 1}</td>
+      <td class="sr-name" title="${escapeHtml(entry.name)}">${displayName}</td>
+      <td style="font-family:'JetBrains Mono',monospace; font-size:12px;">${dobStr}</td>
+      <td class="sr-doctype">${a.docType ? escapeHtml(a.docType.title) : '—'}</td>
+      <td><span class="risk-badge ${a.riskLevel}">● ${escapeHtml(a.riskLabel)}</span></td>
+      <td class="sr-score"><span class="sr-score-num ${scoreColorClass}">${a.totalScore}</span><span class="sr-score-denom">/100</span></td>
+      <td style="font-family:'JetBrains Mono',monospace; font-size:12px;">${debtFmt}${alimonyMark}</td>
+      <td class="sr-top">${escapeHtml(top3)}</td>
+      <td><button class="open-btn">открыть ›</button></td>
+    </tr>
+    <tr class="summary-detail-row" id="detailRow-${idx}" style="display:none;">
+      <td colspan="9"><div class="summary-detail-cell" id="detailCell-${idx}"></div></td>
+    </tr>`;
+  });
+  html += `</tbody></table></div>`;
+  batchSummaryEl.innerHTML = html;
+
+  batchSummaryEl.querySelectorAll('.summary-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const idx = parseInt(row.dataset.idx, 10);
+      toggleDetail(idx);
+    });
+  });
+  const csvBtn = document.getElementById('exportCsvBtn');
+  if (csvBtn) csvBtn.addEventListener('click', exportBatchCsv);
+  renderSubjectGroupingNote();
+}
+
+// v5: группировка по субъекту в batch
+function renderSubjectGroupingNote() {
+  const noteEl = document.getElementById('subjectGroupingNote');
+  if (!noteEl) return;
+  const groups = new Map();
+  for (const e of allAnalyses) {
+    if (!e.subjectInfo || !e.subjectInfo.fio) continue;
+    const key = e.subjectInfo.fio.toLowerCase().replace(/ё/g,'е') + '|' + (e.subjectInfo.dob || '');
+    if (!groups.has(key)) groups.set(key, { fio: e.subjectInfo.fio, dob: e.subjectInfo.dob, items: [] });
+    groups.get(key).items.push(e);
+  }
+  const multi = [...groups.values()].filter(g => g.items.length > 1);
+  if (multi.length === 0) { noteEl.textContent = ''; return; }
+  const parts = multi.map(g => {
+    const totalDebt = g.items.reduce((s, e) => s + (e.ipDebt ? e.ipDebt.totalSum : 0), 0);
+    const debtStr = totalDebt > 0 ? `, долг ${totalDebt.toLocaleString('ru-RU', { maximumFractionDigits: 0 })} ₽` : '';
+    return `${escapeHtml(g.fio)}${g.dob ? ' (' + escapeHtml(g.dob) + ')' : ''} — ${g.items.length} файлов${debtStr}`;
+  });
+  noteEl.innerHTML = '👥 Группировка по субъекту: ' + parts.join(' · ');
+}
+
+// v5: экспорт результатов в CSV (UTF-8 с BOM, точка с запятой как разделитель — для Excel)
+function exportBatchCsv() {
+  const rows = [];
+  rows.push(['№','ФИО','ДР','Возраст','ИНН','СНИЛС','ОГРНИП','Тип документа','Риск','Балл','Долг ФССП ₽','Активн. ИП','Закрыт. ИП','Алименты','Категорий с риском','Файл']);
+  allAnalyses.forEach((e, i) => {
+    const a = e.analysis;
+    const s = e.subjectInfo || {};
+    const d = e.ipDebt;
+    rows.push([
+      i + 1,
+      s.fio || '',
+      s.dob || '',
+      s.age != null ? s.age : '',
+      s.inn || '',
+      s.snils || '',
+      s.ogrnip || '',
+      a && a.docType ? a.docType.title : '',
+      a ? a.riskLabel : 'ошибка',
+      a ? a.totalScore : '',
+      d ? d.totalSum : '',
+      d ? d.activeCount : '',
+      d ? d.closedCount : '',
+      d && d.hasAlimony ? 'да' : '',
+      a ? a.categoriesWithRisk : '',
+      e.name
+    ]);
+  });
+  const csvBody = rows.map(r =>
+    r.map(c => {
+      const s = String(c == null ? '' : c);
+      if (s.includes(';') || s.includes('"') || s.includes('\n')) return '"' + s.replace(/"/g,'""') + '"';
+      return s;
+    }).join(';')
+  ).join('\r\n');
+  const csv = '\ufeff' + csvBody;
+  const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+  downloadFile(csv, `risk_report_${ts}.csv`, 'text/csv;charset=utf-8');
+}
+
+function toggleDetail(idx) {
+  const row = document.getElementById(`detailRow-${idx}`);
+  const cell = document.getElementById(`detailCell-${idx}`);
+  const topRow = document.querySelector(`.summary-row[data-idx="${idx}"]`);
+  if (!row || !cell) return;
+  const isOpen = row.style.display !== 'none';
+
+  document.querySelectorAll('.summary-detail-row').forEach(r => r.style.display = 'none');
+  document.querySelectorAll('.summary-row').forEach(r => r.classList.remove('active'));
+
+  if (isOpen) {
+    currentDetailIndex = -1;
+    renderDebug();
+    return;
+  }
+
+  const entry = allAnalyses[idx];
+  if (!entry || !entry.analysis) return;
+  currentDetailIndex = idx;
+  row.style.display = '';
+  if (topRow) topRow.classList.add('active');
+  // П.5: кешируем HTML деталей — не рендерим повторно при каждом раскрытии
+  if (!entry._cachedDetailHtml) {
+    entry._cachedDetailHtml = renderDetailHtml(entry);
+  }
+  cell.innerHTML = entry._cachedDetailHtml;
+  attachCategoryHandlers(cell, idx);
+  renderDebug();
+}
+
+function renderDetailHtml(entry) {
+  const a = entry.analysis;
+  const subj = entry.subjectInfo;
+  let html = '';
+
+  // ====== КАРТОЧКА СУБЪЕКТА ======
+  html += `<div class="subject-card">
+    <div class="sc-label">Субъект</div>`;
+  if (subj && subj.fio) {
+    const copyText = [subj.fio, subj.dob].filter(Boolean).join(', ');
+    const tooltipText = subj.dob ? 'Копировать ФИО + ДР' : 'Копировать ФИО';
+    html += `<div class="sc-fio-row">
+      <div class="sc-fio">${escapeHtml(subj.fio)}</div>
+      <button class="sc-copy-btn" data-copy="${escapeHtml(copyText)}" title="${tooltipText}"><span class="sc-copy-tooltip">${tooltipText}</span></button>
+    </div>`;
+  } else {
+    html += `<div class="sc-fio empty">Субъект не определён</div>`;
+  }
+  if (subj && subj.dob) {
+    const ageStr = subj.age != null ? `<span class="sc-age">${subj.age} лет</span>` : '';
+    html += `<div class="sc-dob">Дата рождения: ${escapeHtml(subj.dob)} ${ageStr}</div>`;
+  }
+  if (subj && (subj.inn || subj.snils || subj.ogrnip)) {
+    html += `<div class="sc-meta">`;
+    if (subj.inn)    html += `<div class="sc-meta-item"><span class="sc-meta-label">ИНН:</span><span class="sc-meta-value">${escapeHtml(subj.inn)}</span></div>`;
+    if (subj.snils)  html += `<div class="sc-meta-item"><span class="sc-meta-label">СНИЛС:</span><span class="sc-meta-value">${escapeHtml(subj.snils)}</span></div>`;
+    if (subj.ogrnip) html += `<div class="sc-meta-item"><span class="sc-meta-label">ОГРНИП:</span><span class="sc-meta-value">${escapeHtml(subj.ogrnip)}</span></div>`;
+    html += `</div>`;
+  }
+  html += `<div class="sc-file">📄 ${escapeHtml(entry.name)}</div></div>`;
+
+  // ====== ВЫНОСКА «ЗАДОЛЖЕННОСТЬ ФССП» ======
+  if (entry.ipDebt && entry.ipDebt.count > 0) {
+    const ipd = entry.ipDebt;
+    const sumFmt = ipd.totalSum > 0
+      ? ipd.totalSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₽'
+      : 'сумма не определена';
+    html += `<div class="fssp-callout${ipd.hasAlimony ? ' has-alimony' : ''}">
+      <div class="fc-left">
+        <div class="fc-label">Задолженность ФССП</div>
+        <div class="fc-sum ${ipd.totalSum > 0 ? '' : 'no-amount'}">${escapeHtml(sumFmt)}</div>
+        <div class="fc-meta">
+          <span class="fc-pill active">${ipd.activeCount} активн.</span>
+          ${ipd.closedCount > 0 ? `<span class="fc-pill closed">${ipd.closedCount} закрыт.</span>` : ''}
+          <span class="fc-pill">всего ИП: ${ipd.count}</span>
+          ${ipd.hasAlimony ? `<span class="fc-pill alimony">⚠ алименты</span>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ====== БЛОК РИСК-МЕТРИК С BREAKDOWN (v7) ======
+  const sb = a.scoreBreakdown;
+  const scoreColorClass = a.riskLevel === 'high' ? 'danger' :
+                          a.riskLevel === 'medium' ? 'warning' : 'success';
+  html += `<div class="summary-card">
+    <div class="risk-badge ${a.riskLevel}">● ${escapeHtml(a.riskLabel)}</div>
+    <div class="score-main">
+      <div class="score-num ${scoreColorClass}">${a.totalScore}<span class="score-denom"> / 100</span></div>
+      <div class="score-bar-wrap">
+        <div class="score-bar">
+          <div class="score-bar-fill ${scoreColorClass}" style="width:${a.totalScore}%"></div>
+          <div class="score-bar-tick" style="left:20%"></div>
+          <div class="score-bar-tick" style="left:40%"></div>
+          <div class="score-bar-tick" style="left:70%"></div>
+        </div>
+        <div class="score-bar-labels">
+          <span>0</span><span>20</span><span>40</span><span>70</span><span>100</span>
+        </div>
+      </div>
+    </div>
+    <div class="summary-text" style="margin-top:8px;">${escapeHtml(a.riskMessage)}</div>
+    ${a.docType ? `<div class="doc-type-tag">📋 ${escapeHtml(a.docType.title)}</div>` : ''}
+    ${sb && sb.gated ? `<div class="gated-note">🔒 Без явных фактов — балл ограничен ${20}</div>` : ''}
+  </div>`;
+
+  // ====== BREAKDOWN: ИЗ ЧЕГО СЛОЖИЛСЯ БАЛЛ (v7) ======
+  if (sb && (sb.components.length > 0 || sb.adjustments.length > 0 || sb.facts.length > 0)) {
+    html += `<div class="breakdown-block">
+      <div class="block-title"><span class="block-title-icon">Σ</span>Из чего сложился балл</div>`;
+
+    // Явные факты
+    if (sb.facts.length > 0) {
+      html += `<div class="bd-section">
+        <div class="bd-section-title">Явные факты</div>
+        <ul class="bd-facts-list">`;
+      for (const f of sb.facts) {
+        html += `<li>✓ ${escapeHtml(f.label)}</li>`;
+      }
+      html += `</ul></div>`;
+    } else {
+      html += `<div class="bd-section">
+        <div class="bd-section-title">Явные факты</div>
+        <div class="bd-empty">— не обнаружено (режим фоновых сигналов, потолок 20)</div>
+      </div>`;
+    }
+
+    // Таблица компонентов
+    if (sb.components.length > 0) {
+      html += `<div class="bd-section">
+        <div class="bd-section-title">Компоненты балла</div>
+        <table class="bd-table">
+          <thead><tr><th>Категория</th><th>Детализация</th><th class="bd-num">Балл</th></tr></thead>
+          <tbody>`;
+      const sortedComps = [...sb.components].sort((a, b) => b.score - a.score);
+      for (const c of sortedComps) {
+        const detailsHtml = c.breakdown.map(b =>
+          `<div class="bd-detail-row">
+            <span class="bd-detail-label">${escapeHtml(b.label)}</span>
+            <span class="bd-detail-value">+${b.value}</span>
+          </div>`
+        ).join('');
+        html += `<tr>
+          <td class="bd-cat-name">${escapeHtml(c.title)}</td>
+          <td class="bd-details">${detailsHtml}</td>
+          <td class="bd-num bd-cat-score">+${c.score}</td>
+        </tr>`;
+      }
+      html += `</tbody></table></div>`;
+    }
+
+    // Надбавки и штрафы
+    if (sb.adjustments.length > 0) {
+      html += `<div class="bd-section">
+        <div class="bd-section-title">Надбавки и штрафы</div>
+        <ul class="bd-adjust-list">`;
+      for (const adj of sb.adjustments) {
+        const cls = adj.value > 0 ? 'pos' : 'neg';
+        const sign = adj.value > 0 ? '+' : '';
+        html += `<li class="${cls}">
+          <span>${escapeHtml(adj.label)}</span>
+          <span class="bd-adjust-val">${sign}${adj.value}</span>
+        </li>`;
+      }
+      html += `</ul></div>`;
+    }
+
+    // Итоговая строка
+    html += `<div class="bd-total">
+      <div class="bd-total-row">
+        <span>Сумма компонентов</span>
+        <span class="bd-total-val">${sb.rawSum}</span>
+      </div>`;
+    if (sb.adjustSum !== 0) {
+      html += `<div class="bd-total-row">
+        <span>Надбавки / штрафы</span>
+        <span class="bd-total-val">${sb.adjustSum > 0 ? '+' : ''}${sb.adjustSum}</span>
+      </div>`;
+    }
+    if (sb.gated) {
+      html += `<div class="bd-total-row" style="color:var(--info);">
+        <span>Лимит без явных фактов</span>
+        <span class="bd-total-val">→ ${SCORE_CONFIG_V7.noFactsCap}</span>
+      </div>`;
+    }
+    html += `<div class="bd-total-row bd-total-final">
+      <span>ИТОГО</span>
+      <span class="bd-total-val ${scoreColorClass}">${a.totalScore} / 100</span>
+    </div></div>`;
+
+    html += `</div>`; // breakdown-block
+  }
+
+  // ====== ВСПОМОГАТЕЛЬНЫЕ МЕТРИКИ (компактно) ======
+  html += `<div class="metrics-mini">
+    <div class="mm-item"><span class="mm-label">Активн. совпадений</span><span class="mm-val">${a.totalActive}</span></div>
+    <div class="mm-item"><span class="mm-label">Отрицаний</span><span class="mm-val success">${a.totalNegated}</span></div>
+    <div class="mm-item"><span class="mm-label">Исторических</span><span class="mm-val warning">${a.totalHistorical}</span></div>
+    <div class="mm-item"><span class="mm-label">Категорий с риском</span><span class="mm-val">${a.categoriesWithRisk}</span></div>
+    <div class="mm-item"><span class="mm-label">Страниц</span><span class="mm-val">${entry.pagesCount}</span></div>
+  </div>`;
+
+  // ====== РАЗВЁРНУТАЯ ТАБЛИЦА ИП ======
+  if (entry.ipDebt && entry.ipDebt.count > 0) {
+    const ipd = entry.ipDebt;
+    html += `<div class="ip-debt-block">
+      <div class="block-title"><span class="block-title-icon">⚖</span>Исполнительные производства · детально</div>
+      <table class="ip-table">
+        <thead><tr><th>№ ИП</th><th>Сумма</th><th>Статус</th><th>Тип долга</th></tr></thead>
+        <tbody>`;
+    for (const ip of ipd.ips) {
+      const closed = ip.statusKind === 'closed_paid' || ip.statusKind === 'terminated';
+      const amtFmt = ip.amount !== null
+        ? ip.amount.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₽'
+        : '—';
+      html += `<tr class="${closed ? 'closed-row' : ''}">
+        <td>${escapeHtml(ip.number)}</td>
+        <td class="amount-col">${escapeHtml(amtFmt)}</td>
+        <td><span class="ip-status ${escapeHtml(ip.statusKind)}">${escapeHtml(ip.status)}</span></td>
+        <td><span class="ip-type ${escapeHtml(ip.debtKind)}">${escapeHtml(ip.debtType)}</span></td>
+      </tr>`;
+    }
+    html += `</tbody></table>`;
+    if (ipd.totalSum > 0) {
+      const totFmt = ipd.totalSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₽';
+      html += `<div class="ip-total">
+        <span class="ip-total-label">Активная задолженность по ${ipd.activeCount} ИП</span>
+        <span class="ip-total-value">${escapeHtml(totFmt)}</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+    html += `<div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background: var(--danger)"></div>Высокая</div>
+    <div class="legend-item"><div class="legend-dot" style="background: var(--warning)"></div>Средняя</div>
+    <div class="legend-item"><div class="legend-dot" style="background: var(--info)"></div>Низкая</div>
+    <div class="legend-item"><div class="legend-dot" style="background: var(--success)"></div>Отрицание</div>
+    <div class="legend-item"><div class="legend-dot" style="background: var(--text-dim)"></div>Историческое</div>
+    <div class="legend-item"><div class="legend-dot" style="background: gold"></div>Красный текст PDF</div>
+  </div>`;
+
+  html += `<div class="categories-list">`;
+  const sortedEntries = Object.entries(a.categories).sort((x, y) => y[1].score - x[1].score);
+  for (const [key, cat] of sortedEntries) {
+    const hasActive = cat.active > 0;
+    let riskClass = '';
+    if (cat.score >= 5) riskClass = 'risk-high';
+    else if (cat.score >= 2) riskClass = 'risk-medium';
+    else if (cat.active > 0) riskClass = 'risk-low-conf';
+
+    let dotClass = 'clean';
+    if (cat.score >= 5) dotClass = 'found';
+    else if (cat.score >= 2) dotClass = 'warn';
+    else if (cat.active > 0) dotClass = 'warn';
+
+    let scoreClass = '';
+    if (cat.score >= 5) scoreClass = 'high';
+    else if (cat.score >= 2) scoreClass = 'med';
+
+    const statusText = hasActive ? `${cat.active} активн.`
+      : cat.negated > 0 ? `${cat.negated} отриц.`
+      : cat.historical > 0 ? `${cat.historical} истор.` : 'чисто';
+
+    html += `<div class="category ${riskClass} ${hasActive ? 'expanded' : ''}" data-catkey="${escapeHtml(key)}">
+      <div class="category-header">
+        <div class="category-dot ${dotClass}"></div>
+        <div class="category-title">${escapeHtml(cat.title)}</div>
+        <div class="category-meta">
+          <div class="category-score ${scoreClass}">балл: ${cat.score}</div>
+          <div class="category-score">${statusText}</div>
+          <span class="chevron">›</span>
+        </div>
+      </div>
+      <div class="category-body">${renderCategoryBody(cat)}</div>
+    </div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function renderCategoryBody(cat) {
+  if (!cat.matches || cat.matches.length === 0) {
+    return '<div class="empty-state">Совпадений не обнаружено</div>';
+  }
+  const groups = {
+    active: cat.matches.filter(m => !m.negated && !m.historical).sort((a, b) => b.weight - a.weight),
+    historical: cat.matches.filter(m => m.historical && !m.negated),
+    negated: cat.matches.filter(m => m.negated)
+  };
+  let html = '';
+  if (groups.active.length > 0) {
+    html += `<div class="subgroup-title">⚠ Активные (${groups.active.length})</div>`;
+    groups.active.slice(0, 40).forEach(m => html += renderMatchHtml(m));
+    if (groups.active.length > 40) html += `<div class="empty-state" style="margin-top:8px;">…и ещё ${groups.active.length - 40} совпадений</div>`;
+  }
+  if (groups.historical.length > 0) {
+    html += `<div class="subgroup-title">◔ Историческое (${groups.historical.length})</div>`;
+    groups.historical.slice(0, 20).forEach(m => html += renderMatchHtml(m));
+  }
+  if (groups.negated.length > 0) {
+    html += `<div class="subgroup-title">✓ Отрицания (${groups.negated.length})</div>`;
+    groups.negated.slice(0, 20).forEach(m => html += renderMatchHtml(m));
+  }
+  return html;
+}
+
+function renderMatchHtml(match) {
+  let cls = 'match-item';
+  if (match.negated) cls += ' negated';
+  else if (match.historical) cls += ' historical';
+  else if (match.confidenceLevel === 'medium') cls += ' confidence-medium';
+  else if (match.confidenceLevel === 'low') cls += ' confidence-low';
+  if (match.redHighlighted) cls += ' red-highlighted';
+
+  let labels = '';
+  if (match.negated) labels += `<span class="match-label neg">отрицание: ${escapeHtml(match.negationReason || '')}</span>`;
+  else if (match.historical) labels += `<span class="match-label hist">историческое</span>`;
+  else {
+    const lc = match.confidenceLevel === 'high' ? 'high' : match.confidenceLevel === 'medium' ? 'med' : '';
+    labels += `<span class="match-label ${lc}">вес: ${match.weight}</span>`;
+  }
+  if (match.redHighlighted) labels += `<span class="match-label red">красный</span>`;
+
+  const bboxAttr = match.bbox ? JSON.stringify(match.bbox).replace(/"/g, '&quot;') : '';
+  const pageBtn = match.pageNum
+    ? `<a class="page-link-btn" data-page="${match.pageNum}" data-bbox="${bboxAttr}">стр. ${match.pageNum} →</a>`
+    : '';
+
+  const contextHtml = escapeHtml(match.contextBefore || '') +
+    `<mark>${escapeHtml(match.matchedText || '')}</mark>` +
+    escapeHtml(match.contextAfter || '');
+
+  return `<div class="${cls}">
+    <div class="match-meta">
+      <span class="match-keyword">${escapeHtml(match.keyword)}</span>
+      ${labels}
+      ${pageBtn}
+    </div>
+    <div class="match-context">…${contextHtml}…</div>
+  </div>`;
+}
+
+function attachCategoryHandlers(root, fileIdx) {
+  // v5.2: кнопка копирования ФИО+ДР
+  root.querySelectorAll('.sc-copy-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const payload = btn.dataset.copy || '';
+      try {
+        await navigator.clipboard.writeText(payload);
+      } catch (err) {
+        // fallback для старых браузеров
+        const ta = document.createElement('textarea');
+        ta.value = payload; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch (e2) {}
+        document.body.removeChild(ta);
+      }
+      const orig = btn.innerHTML;
+      btn.classList.add('copied');
+      btn.textContent = '';   // очищаем (убираем tooltip span)
+      setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = orig; }, 1500);
+    });
+  });
+  root.querySelectorAll('.category-header').forEach(h => {
+    h.addEventListener('click', () => h.parentElement.classList.toggle('expanded'));
+  });
+  root.querySelectorAll('.page-link-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const pageNum = parseInt(btn.dataset.page, 10);
+      let bbox = null;
+      try {
+        const raw = btn.getAttribute('data-bbox');
+        if (raw) bbox = JSON.parse(raw);
+      } catch (err) {}
+      openPdfAtPage(fileIdx, pageNum, bbox);
+    });
+  });
+}
+
+// ==========================================================================
+// PDF MODAL
+// ==========================================================================
+async function openPdfAtPage(fileIndex, pageNum, bbox) {
+  const entry = allAnalyses[fileIndex];
+  if (!entry) return;
+  try {
+    if (!entry.pdfDocPromise) {
+      const ab = await entry.file.arrayBuffer();
+      entry.pdfDocPromise = pdfjsLib.getDocument({ data: ab }).promise;
+    }
+    const pdf = await entry.pdfDocPromise;
+    const page = await pdf.getPage(pageNum);
+    const rawViewport = page.getViewport({ scale: 1 });
+    const maxW = Math.min(window.innerWidth - 80, 900);
+    const scale = maxW / rawViewport.width;
+    const viewport = page.getViewport({ scale });
+
+    pdfCanvas.width = viewport.width;
+    pdfCanvas.height = viewport.height;
+    const ctx = pdfCanvas.getContext('2d');
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    pdfCanvasWrap.querySelectorAll('.bbox-highlight').forEach(el => el.remove());
+
+    if (bbox && isFinite(bbox.x) && isFinite(bbox.y)) {
+      try {
+        const rect = viewport.convertToViewportRectangle([
+          bbox.x, bbox.y, bbox.x + bbox.width, bbox.y + bbox.height
+        ]);
+        const left = Math.min(rect[0], rect[2]);
+        const top = Math.min(rect[1], rect[3]);
+        const w = Math.abs(rect[2] - rect[0]);
+        const h = Math.abs(rect[3] - rect[1]);
+        const hi = document.createElement('div');
+        hi.className = 'bbox-highlight';
+        hi.style.left = (left - 3) + 'px';
+        hi.style.top = (top - 3) + 'px';
+        hi.style.width = (w + 6) + 'px';
+        hi.style.height = (h + 6) + 'px';
+        pdfCanvasWrap.appendChild(hi);
+      } catch (err) { console.warn('bbox overlay failed', err); }
+    }
+
+    pdfModalTitle.textContent = `${entry.name} · стр. ${pageNum} из ${pdf.numPages}`;
+    pdfModal.classList.add('show');
+  } catch (err) {
+    console.error(err);
+    alert('Не удалось открыть страницу: ' + err.message);
+  }
+}
+
+function closePdfModal() { pdfModal.classList.remove('show'); }
+pdfModalClose.addEventListener('click', closePdfModal);
+pdfModal.addEventListener('click', (e) => { if (e.target === pdfModal) closePdfModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && pdfModal.classList.contains('show')) closePdfModal(); });
+
+// ==========================================================================
+// DEBUG PANEL
+// ==========================================================================
+function renderDebug() {
+  if (currentDetailIndex < 0) {
+    debugPanel.innerHTML = '<div class="empty-state">Откройте файл из таблицы, чтобы увидеть диагностику.</div>';
+    return;
+  }
+  const entry = allAnalyses[currentDetailIndex];
+  if (!entry || !entry.analysis) { debugPanel.innerHTML = ''; return; }
+
+  const rawLen = (entry.rawText || '').length;
+  const normLen = (entry.normalizedText || '').length;
+  const sample = (entry.normalizedText || '').slice(0, 300);
+  const totalFiles = allAnalyses.length;
+  const done = allAnalyses.filter(e => e.analysis);
+  const avgScore = done.length > 0
+    ? Math.round((done.reduce((s, e) => s + e.analysis.totalScore, 0) / done.length) * 10) / 10
+    : 0;
+
+  const normalizedText = entry.normalizedText || '';
+  const simpleChecks = [
+    { word: 'судим', count: (normalizedText.toLowerCase().match(/судим/g) || []).length },
+    { word: 'осужд', count: (normalizedText.toLowerCase().match(/осужд/g) || []).length },
+    { word: 'приговор', count: (normalizedText.toLowerCase().match(/приговор/g) || []).length },
+    { word: 'уголовн', count: (normalizedText.toLowerCase().match(/уголовн/g) || []).length },
+    { word: 'обвин', count: (normalizedText.toLowerCase().match(/обвин/g) || []).length },
+    { word: 'наказани', count: (normalizedText.toLowerCase().match(/наказани/g) || []).length },
+    { word: 'лишени', count: (normalizedText.toLowerCase().match(/лишени/g) || []).length },
+    { word: 'колони', count: (normalizedText.toLowerCase().match(/колони/g) || []).length },
+    { word: 'ук рф', count: (normalizedText.toLowerCase().match(/ук\s+рф/g) || []).length }
+  ];
+
+  let html = `<div class="block-title" style="margin-bottom:12px;"><span class="block-title-icon">🔍</span>Диагностика</div>`;
+  html += `<div class="debug-row"><span class="debug-label">Файлов в пакете</span><span class="debug-value">${totalFiles}</span></div>`;
+  html += `<div class="debug-row"><span class="debug-label">Средний балл по пакету</span><span class="debug-value">${avgScore}</span></div>`;
+  html += `<div class="debug-row"><span class="debug-label">Текущий файл</span><span class="debug-value">${escapeHtml(entry.name)}</span></div>`;
+  html += `<div class="debug-row"><span class="debug-label">Страниц</span><span class="debug-value">${entry.pagesCount}</span></div>`;
+  html += `<div class="debug-row"><span class="debug-label">Длина сырого текста</span><span class="debug-value">${rawLen} симв.</span></div>`;
+  html += `<div class="debug-row"><span class="debug-label">Длина нормализованного</span><span class="debug-value">${normLen} симв.</span></div>`;
+  const totalRules = Object.values(RISK_CATEGORIES).reduce((s, c) => s + c.rules.length, 0);
+  html += `<div class="debug-row"><span class="debug-label">Правил загружено</span><span class="debug-value">${totalRules}</span></div>`;
+
+  let redCount = 0;
+  if (entry.pageTexts) {
+    for (const p of entry.pageTexts) {
+      redCount += p.items.filter(it => it.color === 'red').length;
+    }
+  }
+  html += `<div class="debug-row"><span class="debug-label">Фрагментов красного текста</span><span class="debug-value">${redCount}</span></div>`;
+
+  html += `<div style="margin-top:14px; padding-top:10px; border-top:1px dashed var(--border); color:var(--text-dim);">ПРОСТОЙ ПОИСК ПО КОРНЯМ:</div>`;
+  for (const chk of simpleChecks) {
+    const color = chk.count > 0 ? 'var(--danger)' : 'var(--text-dim)';
+    html += `<div class="debug-row"><span class="debug-label">"${chk.word}"</span><span class="debug-value" style="color:${color}">${chk.count}</span></div>`;
+  }
+
+  html += `<div style="margin-top:14px; padding-top:10px; border-top:1px dashed var(--border); color:var(--text-dim);">НАЧАЛО НОРМАЛИЗОВАННОГО ТЕКСТА:</div>`;
+  html += `<div style="margin-top:8px; padding:10px; background:rgba(0,0,0,0.4); border-radius:6px; color:var(--text); font-size:11px; line-height:1.6; white-space:pre-wrap;">${escapeHtml(sample)}…</div>`;
+
+  const criminalRoots = simpleChecks.filter(c => ['судим', 'осужд', 'приговор', 'уголовн'].includes(c.word));
+  const hasCriminalRoots = criminalRoots.some(c => c.count > 0);
+  const criminalCategory = entry.analysis.categories.criminal;
+  const criminalFoundActive = criminalCategory && criminalCategory.active > 0;
+
+  if (hasCriminalRoots && !criminalFoundActive) {
+    html += `<div style="margin-top:14px; padding:10px; background:rgba(255,74,110,0.1); border:1px solid var(--danger); border-radius:6px; color:var(--danger); font-size:12px;">⚠ ВНИМАНИЕ: в тексте найдены корни уголовных терминов, но паттерны их не распознали.</div>`;
+  }
+
+  debugPanel.innerHTML = html;
+}
+
+function escapeHtml(str) {
+  return (str ?? '')
+    .toString()
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// ==========================================================================
+// КНОПКА «НАВЕРХ»
+// ==========================================================================
+window.addEventListener('scroll', () => {
+  backToTopBtn.classList.toggle('visible', window.scrollY > 450);
+});
+backToTopBtn.addEventListener('click', () => {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+</script>
+</body>
+</html>
