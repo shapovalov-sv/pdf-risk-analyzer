@@ -2068,11 +2068,13 @@ function extractMicroloans(normalizedText, pageTexts) {
   }
   if (anchors.length === 0) return null;
 
-  // Поля записи (ищем ближайшее к якорю вхождение). Дата заявки/займа —
-  // НЕ «дата выдачи документа» (паспорт). Период ИЛИ срок займа.
-  const dateRe = /дата(?:\s+и\s+время)?\s+(?:заявк[а-яё]*|займ[а-яё]*)\s*[:_]?\s*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/gi;
+  // Поля записи (ищем ближайшее к якорю вхождение). Дата заявки/займа/
+  // регистрации — НЕ «дата выдачи документа» (паспорт). Период ИЛИ срок займа.
+  const dateRe = /дата(?:\s+и\s+время)?\s+(?:заявк[а-яё]*|займ[а-яё]*|регистрац[а-яё]*)\s*[:_]?\s*(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4})/gi;
   const periodRe = /(?:период|срок)\s+займ[а-яё]*[^\d]{0,20}(\d{1,4})/gi;
   const cityRe = /(?:насел[её]нн[а-яё]*\s+пункт|место\s+рождени[а-яё]*)\s*[:_]?\s*([А-ЯЁ][А-ЯЁ\-.]{1,30})/gi;
+  // Статус заявки/займа (ОТКАЗ / ОДОБРЕН / ВЫДАН …). ОТКАЗ ⇒ заём не выдан.
+  const statusRe = /статус\s+займ[а-яё]*\s*[:_]?\s*([А-ЯЁA-Z]{3,})/gi;
   // Организация — домен перед «ЗАЯВКИ НА МИКРОЗАЙМ» (ФИНТЕРРА.РФ / MICROKLAD.RU / DENGA.RU).
   const orgRe = /([A-ZА-ЯЁ0-9][A-ZА-ЯЁ0-9\-]*\.(?:РФ|RU|COM|РУ|SU|ORG|NET))\s+заявк[а-яё]*\s+на\s+микрозайм/gi;
 
@@ -2098,6 +2100,9 @@ function extractMicroloans(normalizedText, pageTexts) {
     const periodStr = nearest(periodRe, lo, hi, a.start);
     const cityStr = nearest(cityRe, lo, hi, a.start);
     const orgStr = nearest(orgRe, lo, a.start, a.start); // заголовок секции — до суммы
+    const statusStr = nearest(statusRe, lo, hi, a.start);
+    // ОТКАЗ/ОТКЛОНЕН ⇒ заём НЕ выдан, в сумму взятых не идёт.
+    const rejected = statusStr ? /отказ|отклон/i.test(statusStr) : false;
 
     // v7.1: позиция в исходном PDF (страница + bbox) для перехода по клику
     const loc = pageTexts ? locateMatch(pageTexts, a.start, normalizedText.slice(a.start, a.end)) : null;
@@ -2107,6 +2112,8 @@ function extractMicroloans(normalizedText, pageTexts) {
       period: periodStr ? parseInt(periodStr, 10) : null,
       city: cityStr ? cityStr.trim().replace(/\s+/g, ' ') : null,
       org: orgStr ? orgStr.trim() : null,
+      status: statusStr ? statusStr.trim() : null,
+      rejected,
       pageNum: loc ? loc.pageNum : null,
       bbox: loc ? loc.bbox : null
     });
@@ -2122,8 +2129,16 @@ function extractMicroloans(normalizedText, pageTexts) {
   };
   loans.sort((a, b) => (dnum(b.date) - dnum(a.date)) || (b.amount - a.amount));
 
-  const totalSum = loans.reduce((s, l) => s + l.amount, 0);
-  return { loans, count: loans.length, totalSum };
+  // Отказы НЕ считаются взятыми займами: исключаем из суммы и счёта «выданных».
+  const taken = loans.filter(l => !l.rejected);
+  const totalSum = taken.reduce((s, l) => s + l.amount, 0);
+  return {
+    loans,
+    count: loans.length,
+    takenCount: taken.length,
+    rejectedCount: loans.length - taken.length,
+    totalSum
+  };
 }
 
 // v5.3: SELECTIVE-обработка блока "Результаты скоринга".
@@ -3320,8 +3335,9 @@ function computeHimeraComponent(himeraScore) {
 // v7.2: Компонент микрозаймов — финансовая нагрузка (число заявок в МФО)
 // --------------------------------------------------------------------------
 function computeMicroloansComponent(microloans) {
-  if (!microloans || microloans.count === 0) return { score: 0, breakdown: [] };
-  const n = microloans.count;
+  // Считаем только ВЫДАННЫЕ (не отказы) — отказ не создаёт долговой нагрузки.
+  const n = microloans ? (microloans.takenCount != null ? microloans.takenCount : microloans.count) : 0;
+  if (!n) return { score: 0, breakdown: [] };
   let score;
   if (n >= 10)     score = 10;
   else if (n >= 5) score = 7;
@@ -3330,7 +3346,7 @@ function computeMicroloansComponent(microloans) {
   score = Math.min(SCORE_CONFIG_V7.microloansCap, score);
   return {
     score,
-    breakdown: [{ label: `Микрозаймы: ${n} заявок (финансовая нагрузка)`, value: score }]
+    breakdown: [{ label: `Микрозаймы: ${n} выдан. (финансовая нагрузка)`, value: score }]
   };
 }
 
@@ -3972,7 +3988,7 @@ function renderDetailHtml(entry) {
     html += `<div class="ip-debt-block" style="border-left-color: var(--info);">
       <div class="block-title"><span class="block-title-icon">₿</span>Заявки на микрозаймы · детально</div>
       <table class="ip-table">
-        <thead><tr><th>Дата заявки</th><th>Сумма займа</th><th>Период</th><th>Организация / город</th></tr></thead>
+        <thead><tr><th>Дата заявки</th><th>Сумма займа</th><th>Период</th><th>Статус</th><th>Организация / город</th></tr></thead>
         <tbody>`;
     for (const l of ml.loans) {
       const amtFmt = l.amount.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' ₽';
@@ -3980,22 +3996,28 @@ function renderDetailHtml(entry) {
       const orgCity = l.org
         ? escapeHtml(l.org)
         : (l.city ? `<span style="color:var(--text-dim);">${escapeHtml(l.city)}</span>` : `<span style="color:var(--text-dim);">не указана</span>`);
+      // Статус: отказ выделяем, выданные/одобренные — успехом
+      const statusHtml = l.rejected
+        ? `<span class="ip-status terminated">${escapeHtml(l.status || 'отказ')}</span>`
+        : (l.status ? `<span class="ip-status active">${escapeHtml(l.status)}</span>` : '<span style="color:var(--text-dim);">—</span>');
       // v7.1: клик по строке → переход в исходный PDF
       const srcAttr = l.pageNum
-        ? ` class="src-link" data-page="${l.pageNum}" data-bbox="${l.bbox ? JSON.stringify(l.bbox).replace(/"/g, '&quot;') : ''}" title="Открыть в документе (стр. ${l.pageNum})"`
-        : '';
+        ? ` class="src-link${l.rejected ? ' closed-row' : ''}" data-page="${l.pageNum}" data-bbox="${l.bbox ? JSON.stringify(l.bbox).replace(/"/g, '&quot;') : ''}" title="Открыть в документе (стр. ${l.pageNum})"`
+        : (l.rejected ? ' class="closed-row"' : '');
       const jump = l.pageNum ? ` <span class="src-jump">стр. ${l.pageNum} →</span>` : '';
       html += `<tr${srcAttr}>
         <td>${escapeHtml(l.date || '—')}${jump}</td>
-        <td class="amount-col">${escapeHtml(amtFmt)}</td>
+        <td class="amount-col">${escapeHtml(amtFmt)}${l.rejected ? ' <span style="color:var(--text-dim);font-size:10px;">(запрош.)</span>' : ''}</td>
         <td>${escapeHtml(periodFmt)}</td>
+        <td>${statusHtml}</td>
         <td>${orgCity}</td>
       </tr>`;
     }
     html += `</tbody></table>`;
     const totFmt = ml.totalSum.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' ₽';
+    const rejNote = ml.rejectedCount > 0 ? ` · отказов: ${ml.rejectedCount} (не в сумме)` : '';
     html += `<div class="ip-total" style="background: rgba(74,168,255,0.08); border-color: rgba(74,168,255,0.3);">
-        <span class="ip-total-label">Заявок: ${ml.count} · общая сумма</span>
+        <span class="ip-total-label">Выдано/одобрено: ${ml.takenCount} из ${ml.count}${rejNote} · сумма</span>
         <span class="ip-total-value" style="color: var(--info);">${escapeHtml(totFmt)}</span>
       </div>`;
     html += `</div>`;
