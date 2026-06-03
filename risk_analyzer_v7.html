@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Анализатор рисков PDF — v7</title>
+<title>Анализатор рисков PDF — v8</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;800&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -588,6 +588,18 @@
     border-radius: 6px; font-family: 'JetBrains Mono', monospace;
     font-size: 11px; color: var(--info);
   }
+  /* V8: зелёная шкала положительных факторов (стабильность) */
+  .pos-card::before {
+    background: linear-gradient(90deg, var(--danger), var(--warning), var(--success)) !important;
+  }
+  .pos-num { color: var(--success) !important; }
+  .pos-fill {
+    background: linear-gradient(90deg, var(--danger), var(--warning) 50%, var(--success)) !important;
+  }
+  .pos-badge { background: rgba(74,255,180,0.12); color: var(--success); border: 1px solid rgba(74,255,180,0.3); }
+  .pos-badge.low { background: rgba(255,168,74,0.12); color: var(--warning); border-color: rgba(255,168,74,0.3); }
+  .pos-badge.base { background: rgba(74,168,255,0.12); color: var(--info); border-color: rgba(74,168,255,0.3); }
+  .pos-badge.good, .pos-badge.high { background: rgba(74,255,180,0.12); color: var(--success); border-color: rgba(74,255,180,0.3); }
 
   .breakdown-block {
     background: var(--bg-card); border: 1px solid var(--border);
@@ -724,9 +736,9 @@
 <div class="container">
 
 <header>
-  <div class="eyebrow">OFFLINE ENGINE / V7 / SCORE 0–100 / FACT-GATED</div>
-  <h1>Анализатор <span class="accent">рисков</span> PDF<span class="version">v7.0</span></h1>
-  <p class="subtitle">Балл 0–100 на основе явных фактов. Приоритет — уголовка. Без явных фактов балл ограничен 20. Прозрачный разбор: видно, из чего сложился результат. Работает полностью офлайн.</p>
+  <div class="eyebrow">OFFLINE ENGINE / V8 / РИСК + СТАБИЛЬНОСТЬ</div>
+  <h1>Анализатор <span class="accent">рисков</span> PDF<span class="version">v8.0</span></h1>
+  <p class="subtitle">Две независимые шкалы 0–100: риск-балл (явные факты) и факторы стабильности (семья, имущество, работа, банки, регистрация в РФ). Прозрачный разбор обеих. Работает полностью офлайн.</p>
   <div class="privacy-badge">🔒 Документы не покидают ваше устройство</div>
 </header>
 
@@ -1101,6 +1113,123 @@ const COMPILED_RULES = (() => {
 })();
 
 // ==========================================================================
+// V8: ПОЛОЖИТЕЛЬНЫЕ ФАКТОРЫ (ШКАЛА СТАБИЛЬНОСТИ / БЛАГОНАДЁЖНОСТИ)
+// Отдельная шкала 0–100 рядом с риск-баллом. Распознавание через тот же
+// движок findMatches (учитывает отрицания: «не женат», «детей нет»,
+// «имущество отсутствует» НЕ засчитываются как плюс).
+// ==========================================================================
+const POSITIVE_CATEGORIES = {
+  family: {
+    title: 'Семья',
+    rules: [
+      { pattern: wb('женат'), weight: 3, label: 'женат' },
+      { pattern: wb('замужем'), weight: 3, label: 'замужем' },
+      { pattern: wb('супруг(а|и|у|ой|ом|е|ам|ами)?'), weight: 2, label: 'супруг(а)' },
+      { pattern: wb('семейн(ое|ого)\\s+положени'), weight: 1, label: 'семейное положение' },
+      { pattern: wb('загс'), weight: 2, label: 'ЗАГС' },
+      { pattern: wb('бракосочетани|заключени(е|и)\\s+брака|брак\\s+зарегистрирован'), weight: 3, label: 'брак зарегистрирован' },
+      { pattern: wb('дет(и|ей|ям|ьми|ях)'), weight: 2, label: 'дети' },
+      { pattern: wb('реб(ё|е)н(ок|ка|ку|ком|ке)'), weight: 2, label: 'ребёнок' },
+      { pattern: wb('сын(|а|у|ом|е|овья|овей)'), weight: 1, label: 'сын' },
+      { pattern: wb('доч(ь|ери|ерью|ек|ерей)'), weight: 1, label: 'дочь' },
+      { pattern: wb('многодетн'), weight: 3, label: 'многодетный' },
+      { pattern: wb('материнск(ий|ого|им)\\s+капитал'), weight: 2, label: 'материнский капитал' }
+    ]
+  },
+  realty: {
+    title: 'Недвижимость',
+    rules: [
+      { pattern: wb('квартир(а|ы|у|е|ой|ах)'), weight: 2, label: 'квартира' },
+      { pattern: wb('жил(ой|ого|ом)\\s+дом'), weight: 2, label: 'жилой дом' },
+      { pattern: wb('недвижим(ость|ости|ым|ого|остью)'), weight: 2, label: 'недвижимость' },
+      { pattern: wb('земельн(ый|ого|ом|ым)\\s+участ'), weight: 2, label: 'земельный участок' },
+      { pattern: wb('росреестр'), weight: 2, label: 'Росреестр' },
+      { pattern: wb('егрн'), weight: 2, label: 'ЕГРН' },
+      { pattern: wb('кадастров(ый|ого|ом|ым|ы)'), weight: 1, label: 'кадастр' },
+      { pattern: wb('собственник(|а|у|ом|е)'), weight: 2, label: 'собственник' },
+      { pattern: wb('прав(о|а)\\s+собственности'), weight: 2, label: 'право собственности' }
+    ]
+  },
+  vehicle: {
+    title: 'Транспорт',
+    rules: [
+      { pattern: wb('автомобил(ь|я|ю|ем|е)'), weight: 2, label: 'автомобиль' },
+      { pattern: wb('транспортн(ое|ого|ым)\\s+средств'), weight: 2, label: 'транспортное средство' },
+      { pattern: wb('птс'), weight: 1, label: 'ПТС' },
+      { pattern: wb('свидетельств(о|а)\\s+о\\s+регистрации\\s+тс'), weight: 1, label: 'СТС' },
+      { pattern: wb('гос(\\.|номер|ударственн)'), weight: 0, label: 'госномер' },
+      { pattern: wb('марка\\s+(?:тс|автомоб|машин)'), weight: 1, label: 'марка авто' }
+    ]
+  },
+  work_income: {
+    title: 'Работа и доход',
+    rules: [
+      { pattern: wb('мест(о|а)\\s+работы'), weight: 2, label: 'место работы' },
+      { pattern: wb('должност(ь|и)'), weight: 1, label: 'должность' },
+      { pattern: wb('работодател'), weight: 2, label: 'работодатель' },
+      { pattern: wb('доход(|а|у|ом|е|ы)'), weight: 2, label: 'доход' },
+      { pattern: wb('зараб(оток|отн(ая|ой|ую)\\s+плат)'), weight: 1, label: 'зарплата' },
+      { pattern: wb('сфр|пенсионн(ый|ого)\\s+фонд'), weight: 1, label: 'СФР' },
+      { pattern: wb('трудоустроен|трудов(ой|ого)\\s+(догов|стаж)'), weight: 2, label: 'трудоустройство' }
+    ]
+  },
+  bank: {
+    title: 'Банковский клиент',
+    rules: [
+      { pattern: wb('банковск(ий|ого|ом|ая|ой)\\s+(счёт|счет|карт)'), weight: 2, label: 'банковский счёт/карта' },
+      { pattern: wb('клиент(|ы)\\s+банка'), weight: 2, label: 'клиент банка' },
+      { pattern: wb('расч(ё|е)тн(ый|ого|ом)\\s+(счёт|счет)'), weight: 1, label: 'расчётный счёт' },
+      { pattern: wb('вклад(|а|у|ом|е|ы)'), weight: 1, label: 'вклад' },
+      { pattern: wb('депозит'), weight: 1, label: 'депозит' },
+      { pattern: wb('номер\\s+счета'), weight: 1, label: 'номер счёта' }
+    ]
+  },
+  travel: {
+    title: 'Поездки',
+    rules: [
+      { pattern: wb('перел(ё|е)т(|а|ы|ов)'), weight: 2, label: 'перелёт' },
+      { pattern: wb('авиабилет|авиаперел(ё|е)т|авиарейс'), weight: 2, label: 'авиабилет' },
+      { pattern: wb('ж[/\\s]*д\\s+билет|железнодорожн(ый|ого)\\s+билет'), weight: 2, label: 'ж/д билет' },
+      { pattern: wb('бронировани(е|я)'), weight: 1, label: 'бронирование' },
+      { pattern: wb('загранпаспорт|заграничн(ый|ого)\\s+паспорт'), weight: 1, label: 'загранпаспорт' }
+    ]
+  },
+  registration: {
+    title: 'Регистрация в РФ',
+    rules: [
+      { pattern: wb('адрес\\s+регистрации'), weight: 1, label: 'адрес регистрации' },
+      { pattern: wb('регистраци(я|и)\\s+по\\s+мест'), weight: 2, label: 'регистрация по месту жительства' },
+      { pattern: wb('прописк(а|и|е)'), weight: 1, label: 'прописка' },
+      { pattern: wb('паспорт\\s+(?:рф|гражданина\\s+рф)'), weight: 2, label: 'паспорт РФ' },
+      { pattern: wb('гражданств(о|а)\\s+рф|гражданин\\s+рф'), weight: 2, label: 'гражданство РФ' }
+    ]
+  },
+  civic: {
+    title: 'Идентификация',
+    rules: [
+      { pattern: wb('снилс'), weight: 1, label: 'СНИЛС' },
+      { pattern: wb('госуслуг'), weight: 1, label: 'Госуслуги' },
+      { pattern: wb('избирател'), weight: 1, label: 'избиратель' },
+      { pattern: wb('полис\\s+омс'), weight: 1, label: 'ОМС' },
+      { pattern: wb('водительск(ое|ого)\\s+удостоверени'), weight: 1, label: 'водительское удостоверение' }
+    ]
+  }
+};
+
+const COMPILED_POSITIVE_RULES = (() => {
+  const out = {};
+  for (const [key, cat] of Object.entries(POSITIVE_CATEGORIES)) {
+    out[key] = cat.rules.map(rule => {
+      const pat = rule.pattern.replace(/ё/g, '[её]');
+      let _regex = null;
+      try { _regex = new RegExp(pat, 'gi'); } catch (e) { console.warn('Bad positive pattern:', rule.pattern, e); }
+      return { ...rule, _regex };
+    });
+  }
+  return out;
+})();
+
+// ==========================================================================
 // ОТРИЦАНИЯ
 // ==========================================================================
 // v5: помечаем постпозиционные отрицания (могут стоять ПОСЛЕ ключевого слова)
@@ -1135,6 +1264,15 @@ const NEGATION_PATTERNS = [
   'прекращен(о|а|ы)\\s+в\\s+связи\\s+с',
   'ист(ё|е)к\\s+срок\\s+давности',
   'оправдан(|а|ы)\\s+судом?',
+
+  // === v8: отрицания положительных факторов («не женат», «детей нет») ===
+  'не\\s+женат',
+  'не\\s+замужем',
+  'не\\s+работает',
+  'не\\s+трудоустроен',
+  'детей\\s+нет',
+  'нет\\s+детей',
+  'без\\s+дет(ей|и)',
 
   // === v5 ПОСТПОЗИЦИОННЫЕ (после ключа): помечены __post ===
   '__post:не\\s+имее(т|тся|м|шь)',
@@ -2286,6 +2424,10 @@ async function analyzeEntry(entry) {
 
   // v7.1: заявки на микрозаймы (отдельная таблица)
   entry.microloans = extractMicroloans(normalizedText, entry.pageTexts);
+
+  // v8: положительные факторы (шкала стабильности)
+  entry.positive = analyzePositive(normalizedText, entry.pageTexts, entry.subjectInfo);
+  entry.positiveScore = computePositiveScoreV8(entry.positive);
 
   // v5: факт-ориентированный скоринг категории "ФССП"
   // ВАЖНО: в v7 этот блок оставлен для совместимости (категория fssp по-прежнему имеет .score),
@@ -3574,6 +3716,131 @@ function computeScoreV7(analysis, ipDebt, himeraScore, microloans) {
   };
 }
 
+// ==========================================================================
+// V8: АНАЛИЗ И СКОРИНГ ПОЛОЖИТЕЛЬНЫХ ФАКТОРОВ (ШКАЛА СТАБИЛЬНОСТИ)
+// ==========================================================================
+const POSITIVE_CONFIG_V8 = {
+  caps: {
+    family: 22, realty: 18, work_income: 18, bank: 12,
+    vehicle: 12, travel: 8, registration: 12, civic: 6
+  },
+  thresholds: { low: 25, base: 50, good: 75 }, // >75 — высокая
+  regBefore2014Bonus: 6,   // регистрация/документы в РФ до 2014 г.
+  incomeBonus: { high: 5, mid: 3 }  // ≥100k / ≥50k
+};
+
+// Распознаёт положительные факторы тем же движком (с учётом отрицаний).
+function analyzePositive(normalizedText, pageTexts, subjectInfo) {
+  const textForSearch = normalizedText.toLowerCase().replace(/ё/g, 'е');
+  const sentences = splitIntoSentences(normalizedText);
+  const categories = {};
+  for (const [key, cat] of Object.entries(POSITIVE_CATEGORIES)) {
+    const matches = findMatches(normalizedText, textForSearch, sentences, COMPILED_POSITIVE_RULES[key] || [], pageTexts, subjectInfo);
+    const active = matches.filter(m => !m.negated);
+    categories[key] = { key, title: cat.title, matches, active: active.length };
+  }
+  return { categories, structured: detectPositiveStructured(normalizedText) };
+}
+
+// Структурные плюсы: давность регистрации/документов в РФ и величина дохода.
+function detectPositiveStructured(text) {
+  let regBefore2014 = false, regYear = null;
+  const ctxRe = /(?:регистрац|прописк|проживани|выдач[аи]\s+(?:документа|паспорта)|выдан)[^\d]{0,40}\d{1,2}[.\/-]\d{1,2}[.\/-](\d{4})/gi;
+  let m;
+  while ((m = ctxRe.exec(text)) !== null) {
+    const y = parseInt(m[1], 10);
+    if (y >= 1980 && y <= 2014) { regBefore2014 = true; if (!regYear || y < regYear) regYear = y; }
+  }
+
+  let incomeAmount = 0;
+  const incRe = /(?:сумма\s+дохода|общая[\s_]+сумма[\s_]+дохода|доход[ауы]?)[\s:_]*(\d[\d\s ]{2,})/gi;
+  while ((m = incRe.exec(text)) !== null) {
+    const v = parseFloat(m[1].replace(/[\s ]/g, ''));
+    if (!isNaN(v) && v > incomeAmount && v < 1e9) incomeAmount = v;
+  }
+  return { regBefore2014, regYear, incomeAmount };
+}
+
+function computePositiveScoreV8(positive) {
+  if (!positive) return null;
+  const C = POSITIVE_CONFIG_V8.caps;
+  const st = positive.structured;
+  const cats = positive.categories;
+  // Активные (не отрицанные) лейблы категории — важна ПРИСУТСТВИЕ фактора, не частота.
+  const labels = (key) => new Set((cats[key] ? cats[key].matches : []).filter(m => !m.negated).map(m => m.keyword));
+  const any = (set, arr) => arr.some(l => set.has(l));
+
+  const components = [];
+  const add = (key, title, v, breakdown) => {
+    const score = Math.min(C[key], Math.round(v));
+    if (score >= 1) components.push({ key, title, score, breakdown });
+  };
+
+  // Семья
+  { const s = labels('family'), bd = []; let v = 0;
+    if (any(s, ['женат', 'замужем', 'супруг(а)', 'брак зарегистрирован', 'ЗАГС', 'семейное положение'])) { v += 12; bd.push({ label: 'В браке / семья', value: 12 }); }
+    if (any(s, ['дети', 'ребёнок', 'сын', 'дочь'])) { v += 8; bd.push({ label: 'Есть дети', value: 8 }); }
+    if (s.has('многодетный')) { v += 3; bd.push({ label: 'Многодетный', value: 3 }); }
+    if (s.has('материнский капитал')) { v += 2; bd.push({ label: 'Материнский капитал', value: 2 }); }
+    add('family', 'Семья', v, bd); }
+
+  // Недвижимость
+  { const s = labels('realty'), bd = []; let v = 0;
+    const types = ['квартира', 'жилой дом', 'недвижимость', 'земельный участок'].filter(l => s.has(l));
+    if (types.length) { v += 10 + (types.length - 1) * 4; bd.push({ label: `Недвижимость: ${types.join(', ')}`, value: 10 + (types.length - 1) * 4 }); }
+    if (any(s, ['собственник', 'право собственности', 'Росреестр', 'ЕГРН', 'кадастр'])) { v += 3; bd.push({ label: 'Право собственности / Росреестр', value: 3 }); }
+    add('realty', 'Недвижимость', v, bd); }
+
+  // Транспорт
+  { const s = labels('vehicle'), bd = []; let v = 0;
+    if (any(s, ['автомобиль', 'транспортное средство', 'ПТС', 'СТС', 'марка авто', 'госномер'])) { v += 9; bd.push({ label: 'Транспортное средство', value: 9 }); }
+    add('vehicle', 'Транспорт', v, bd); }
+
+  // Работа и доход
+  { const s = labels('work_income'), bd = []; let v = 0;
+    if (any(s, ['место работы', 'работодатель', 'должность', 'трудоустройство', 'СФР'])) { v += 10; bd.push({ label: 'Трудоустройство / место работы', value: 10 }); }
+    else if (s.has('доход')) { v += 4; bd.push({ label: 'Указан доход', value: 4 }); }
+    if (st.incomeAmount >= 100000) { v += POSITIVE_CONFIG_V8.incomeBonus.high; bd.push({ label: `Доход ${st.incomeAmount.toLocaleString('ru-RU')} ₽`, value: POSITIVE_CONFIG_V8.incomeBonus.high }); }
+    else if (st.incomeAmount >= 50000) { v += POSITIVE_CONFIG_V8.incomeBonus.mid; bd.push({ label: `Доход ${st.incomeAmount.toLocaleString('ru-RU')} ₽`, value: POSITIVE_CONFIG_V8.incomeBonus.mid }); }
+    add('work_income', 'Работа и доход', v, bd); }
+
+  // Банковский клиент
+  { const s = labels('bank'), bd = []; let v = 0;
+    if (any(s, ['банковский счёт/карта', 'клиент банка', 'расчётный счёт', 'номер счёта'])) { v += 8; bd.push({ label: 'Клиент банка / счёт', value: 8 }); }
+    if (any(s, ['вклад', 'депозит'])) { v += 3; bd.push({ label: 'Вклад / депозит', value: 3 }); }
+    add('bank', 'Банковский клиент', v, bd); }
+
+  // Поездки
+  { const s = labels('travel'), bd = []; let v = 0;
+    const air = any(s, ['перелёт', 'авиабилет']);
+    const rail = s.has('ж/д билет');
+    if (air || rail) { v += 5; bd.push({ label: air && rail ? 'Перелёты и ж/д' : air ? 'Перелёты' : 'Ж/д билеты', value: 5 }); }
+    if ((air && rail) || s.has('загранпаспорт')) { v += 3; bd.push({ label: s.has('загранпаспорт') ? 'Загранпаспорт' : 'Несколько видов поездок', value: 3 }); }
+    add('travel', 'Поездки', v, bd); }
+
+  // Регистрация в РФ
+  { const s = labels('registration'), bd = []; let v = 0;
+    if (any(s, ['адрес регистрации', 'регистрация по месту жительства', 'прописка', 'паспорт РФ', 'гражданство РФ'])) { v += 6; bd.push({ label: 'Регистрация / гражданство РФ', value: 6 }); }
+    if (st.regBefore2014) { v += POSITIVE_CONFIG_V8.regBefore2014Bonus; bd.push({ label: `Регистрация/документы в РФ с ${st.regYear} (до 2014)`, value: POSITIVE_CONFIG_V8.regBefore2014Bonus }); }
+    add('registration', 'Регистрация в РФ', v, bd); }
+
+  // Идентификация
+  { const s = labels('civic'), bd = []; let v = 0;
+    if (any(s, ['СНИЛС', 'Госуслуги', 'избиратель', 'ОМС', 'водительское удостоверение'])) { v += 4; bd.push({ label: 'Идентификация (СНИЛС/Госуслуги и т.п.)', value: 4 }); }
+    add('civic', 'Идентификация', v, bd); }
+
+  let totalScore = Math.max(0, Math.min(100, Math.round(components.reduce((s, c) => s + c.score, 0))));
+
+  const t = POSITIVE_CONFIG_V8.thresholds;
+  let level, label;
+  if (totalScore <= t.low) { level = 'low'; label = 'Низкая стабильность'; }
+  else if (totalScore <= t.base) { level = 'base'; label = 'Базовая стабильность'; }
+  else if (totalScore <= t.good) { level = 'good'; label = 'Хорошая стабильность'; }
+  else { level = 'high'; label = 'Высокая стабильность'; }
+
+  return { totalScore, level, label, components };
+}
+
 function computeRiskLevel(totalScore, categoriesWithRisk, docType) {
   // Legacy-обёртка для совместимости со старыми вызовами.
   // Возвращает только базовые поля, без breakdown (тот считается отдельно через computeScoreV7).
@@ -3934,6 +4201,45 @@ function renderDetailHtml(entry) {
     </div></div>`;
 
     html += `</div>`; // breakdown-block
+  }
+
+  // ====== V8: ШКАЛА СТАБИЛЬНОСТИ (ПОЛОЖИТЕЛЬНЫЕ ФАКТОРЫ) ======
+  const ps = entry.positiveScore;
+  if (ps) {
+    html += `<div class="summary-card pos-card">
+      <div class="risk-badge pos-badge ${ps.level}">✦ ${escapeHtml(ps.label)}</div>
+      <div class="score-main">
+        <div class="score-num pos-num">${ps.totalScore}<span class="score-denom"> / 100</span></div>
+        <div class="score-bar-wrap">
+          <div class="score-bar">
+            <div class="score-bar-fill pos-fill" style="width:${ps.totalScore}%"></div>
+            <div class="score-bar-tick" style="left:25%"></div>
+            <div class="score-bar-tick" style="left:50%"></div>
+            <div class="score-bar-tick" style="left:75%"></div>
+          </div>
+          <div class="score-bar-labels"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+        </div>
+      </div>
+      <div class="summary-text" style="margin-top:8px;">Положительные факторы (семья, имущество, работа, банки, поездки, регистрация в РФ). Независимая шкала — не уменьшает риск-балл.</div>
+    </div>`;
+    if (ps.components.length > 0) {
+      html += `<div class="breakdown-block">
+        <div class="block-title"><span class="block-title-icon" style="background:var(--success);color:var(--bg);">✦</span>Факторы стабильности</div>
+        <table class="bd-table">
+          <thead><tr><th>Категория</th><th>Детализация</th><th class="bd-num">Балл</th></tr></thead>
+          <tbody>`;
+      for (const c of [...ps.components].sort((x, y) => y.score - x.score)) {
+        const det = c.breakdown.map(b =>
+          `<div class="bd-detail-row"><span class="bd-detail-label">${escapeHtml(b.label)}</span><span class="bd-detail-value" style="color:var(--success);">+${b.value}</span></div>`
+        ).join('');
+        html += `<tr>
+          <td class="bd-cat-name">${escapeHtml(c.title)}</td>
+          <td class="bd-details">${det}</td>
+          <td class="bd-num bd-cat-score" style="color:var(--success);">+${c.score}</td>
+        </tr>`;
+      }
+      html += `</tbody></table></div>`;
+    }
   }
 
   // ====== ВСПОМОГАТЕЛЬНЫЕ МЕТРИКИ (компактно) ======
