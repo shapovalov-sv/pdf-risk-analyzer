@@ -1304,6 +1304,12 @@ const COMPILED_NEGATIONS = NEGATION_PATTERNS.map(negEntry => {
 // v5: расширенный список маркеров цитирования закона
 const CITATION_PATTERN = /(согласно\s+(?:ч\.\s*\d+\s+)?ст|в\s+соответствии\s+со?\s+(?:ч\.\s*\d+\s+)?ст|предусмотренн[а-яёa-z0-9]+\s+(?:ч\.\s*\d+\s+)?ст|ч\.\s*\d+\s+ст|по\s+смыслу\s+(?:ч\.\s*\d+\s+)?ст|комментари[а-яёa-z0-9]*\s+к\s+(?:ч\.\s*\d+\s+)?ст|толкование\s+(?:ч\.\s*\d+\s+)?ст|применени[а-яёa-z0-9]+\s+(?:норм\s+)?ст|нарушение\s+(?:требований\s+)?ст|квалифицир(?:уется|ован)\s+по\s+ст|санкци[а-яёa-z0-9]+\s+ст|диспозици[а-яёa-z0-9]+\s+ст)/i;
 
+// v8: «хищение/кража» в контексте УТРАТЫ/ЗАМЕНЫ ДОКУМЕНТА (ВУ, паспорт) — это
+// про похищенный документ, а НЕ преступление субъекта. Напр.: «замена ВУ в
+// связи с утратой (хищением)», «выдача паспорта взамен утраченного (похищенного)».
+const DOC_LOSS_CONTEXT = /(утрат[а-яё]*|перевыпуск|переоформлени[а-яё]*|дубликат|взамен|причина\s+выдачи|замен[аеуыой][а-яё]*\s+(?:ву|вод|паспорт|удостоверени|документ))/i;
+const DOC_LOSS_THEFT_LABELS = new Set(['хищение', 'кража']);
+
 // ==========================================================================
 // ТИПЫ ДОКУМЕНТОВ
 // ==========================================================================
@@ -2867,6 +2873,14 @@ function findMatches(normalizedText, textForSearch, sentences, rules, pageTexts,
         confidenceMultiplier *= 0.3;
       }
 
+      // v8: «хищение/кража» как причина утраты/замены документа (ВУ, паспорт) —
+      // не про криминал субъекта. Помечаем как неприменимое (отрицание).
+      let docLossNegated = false;
+      if (DOC_LOSS_THEFT_LABELS.has(rule.label)) {
+        const dlWin = normalizedText.slice(Math.max(0, idx - 90), idx + 25);
+        if (DOC_LOSS_CONTEXT.test(dlWin)) docLossNegated = true;
+      }
+
       const match = {
         keyword: rule.label,
         matchedText: matchedOriginal,
@@ -2874,8 +2888,8 @@ function findMatches(normalizedText, textForSearch, sentences, rules, pageTexts,
         position: idx,
         weight: rule.weight,
         confidenceMultiplier, confidenceLevel,
-        negated: negationResult.negated,
-        negationReason: negationResult.reason,
+        negated: negationResult.negated || docLossNegated,
+        negationReason: docLossNegated ? 'утрата/замена документа' : negationResult.reason,
         historical,
         sentence: sentence?.text || ''
       };
