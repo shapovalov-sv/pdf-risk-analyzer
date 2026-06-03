@@ -3739,26 +3739,33 @@ function analyzePositive(normalizedText, pageTexts, subjectInfo) {
     const active = matches.filter(m => !m.negated);
     categories[key] = { key, title: cat.title, matches, active: active.length };
   }
-  return { categories, structured: detectPositiveStructured(normalizedText) };
+  return { categories, structured: detectPositiveStructured(normalizedText, pageTexts) };
 }
 
 // Структурные плюсы: давность регистрации/документов в РФ и величина дохода.
-function detectPositiveStructured(text) {
-  let regBefore2014 = false, regYear = null;
+// Возвращает также позицию (страница+bbox) для перехода к источнику в PDF.
+function detectPositiveStructured(text, pageTexts) {
+  let regBefore2014 = false, regYear = null, regLoc = null;
   const ctxRe = /(?:регистрац|прописк|проживани|выдач[аи]\s+(?:документа|паспорта)|выдан)[^\d]{0,40}\d{1,2}[.\/-]\d{1,2}[.\/-](\d{4})/gi;
   let m;
   while ((m = ctxRe.exec(text)) !== null) {
     const y = parseInt(m[1], 10);
-    if (y >= 1980 && y <= 2014) { regBefore2014 = true; if (!regYear || y < regYear) regYear = y; }
+    if (y >= 1980 && y <= 2014 && (!regYear || y < regYear)) {
+      regBefore2014 = true; regYear = y;
+      regLoc = pageTexts ? locateMatch(pageTexts, m.index, m[0]) : null;
+    }
   }
 
-  let incomeAmount = 0;
+  let incomeAmount = 0, incomeLoc = null;
   const incRe = /(?:сумма\s+дохода|общая[\s_]+сумма[\s_]+дохода|доход[ауы]?)[\s:_]*(\d[\d\s ]{2,})/gi;
   while ((m = incRe.exec(text)) !== null) {
     const v = parseFloat(m[1].replace(/[\s ]/g, ''));
-    if (!isNaN(v) && v > incomeAmount && v < 1e9) incomeAmount = v;
+    if (!isNaN(v) && v > incomeAmount && v < 1e9) {
+      incomeAmount = v;
+      incomeLoc = pageTexts ? locateMatch(pageTexts, m.index, m[0]) : null;
+    }
   }
-  return { regBefore2014, regYear, incomeAmount };
+  return { regBefore2014, regYear, regLoc, incomeAmount, incomeLoc };
 }
 
 function computePositiveScoreV8(positive) {
@@ -3766,9 +3773,21 @@ function computePositiveScoreV8(positive) {
   const C = POSITIVE_CONFIG_V8.caps;
   const st = positive.structured;
   const cats = positive.categories;
-  // Активные (не отрицанные) лейблы категории — важна ПРИСУТСТВИЕ фактора, не частота.
-  const labels = (key) => new Set((cats[key] ? cats[key].matches : []).filter(m => !m.negated).map(m => m.keyword));
-  const any = (set, arr) => arr.some(l => set.has(l));
+  // Карта лейбл→матч (первый активный) — важна ПРИСУТСТВИЕ фактора, не частота.
+  // Через матч получаем позицию в PDF (page/bbox) для перехода к источнику.
+  const mapOf = (key) => {
+    const mp = new Map();
+    for (const m of (cats[key] ? cats[key].matches : [])) {
+      if (m.negated) continue;
+      if (!mp.has(m.keyword)) mp.set(m.keyword, m);
+    }
+    return mp;
+  };
+  const any = (s, arr) => arr.some(l => s.has(l));
+  const locOf = (s, arr) => {
+    for (const l of arr) { const m = s.get(l); if (m && m.pageNum) return { pageNum: m.pageNum, bbox: m.bbox }; }
+    return {};
+  };
 
   const components = [];
   const add = (key, title, v, breakdown) => {
@@ -3777,56 +3796,64 @@ function computePositiveScoreV8(positive) {
   };
 
   // Семья
-  { const s = labels('family'), bd = []; let v = 0;
-    if (any(s, ['женат', 'замужем', 'супруг(а)', 'брак зарегистрирован', 'ЗАГС', 'семейное положение'])) { v += 12; bd.push({ label: 'В браке / семья', value: 12 }); }
-    if (any(s, ['дети', 'ребёнок', 'сын', 'дочь'])) { v += 8; bd.push({ label: 'Есть дети', value: 8 }); }
-    if (s.has('многодетный')) { v += 3; bd.push({ label: 'Многодетный', value: 3 }); }
-    if (s.has('материнский капитал')) { v += 2; bd.push({ label: 'Материнский капитал', value: 2 }); }
+  { const s = mapOf('family'), bd = []; let v = 0;
+    const married = ['женат', 'замужем', 'супруг(а)', 'брак зарегистрирован', 'ЗАГС', 'семейное положение'];
+    const kids = ['дети', 'ребёнок', 'сын', 'дочь'];
+    if (any(s, married)) { v += 12; bd.push({ label: 'В браке / семья', value: 12, ...locOf(s, married) }); }
+    if (any(s, kids)) { v += 8; bd.push({ label: 'Есть дети', value: 8, ...locOf(s, kids) }); }
+    if (s.has('многодетный')) { v += 3; bd.push({ label: 'Многодетный', value: 3, ...locOf(s, ['многодетный']) }); }
+    if (s.has('материнский капитал')) { v += 2; bd.push({ label: 'Материнский капитал', value: 2, ...locOf(s, ['материнский капитал']) }); }
     add('family', 'Семья', v, bd); }
 
   // Недвижимость
-  { const s = labels('realty'), bd = []; let v = 0;
+  { const s = mapOf('realty'), bd = []; let v = 0;
     const types = ['квартира', 'жилой дом', 'недвижимость', 'земельный участок'].filter(l => s.has(l));
-    if (types.length) { v += 10 + (types.length - 1) * 4; bd.push({ label: `Недвижимость: ${types.join(', ')}`, value: 10 + (types.length - 1) * 4 }); }
-    if (any(s, ['собственник', 'право собственности', 'Росреестр', 'ЕГРН', 'кадастр'])) { v += 3; bd.push({ label: 'Право собственности / Росреестр', value: 3 }); }
+    if (types.length) { v += 10 + (types.length - 1) * 4; bd.push({ label: `Недвижимость: ${types.join(', ')}`, value: 10 + (types.length - 1) * 4, ...locOf(s, types) }); }
+    const own = ['собственник', 'право собственности', 'Росреестр', 'ЕГРН', 'кадастр'];
+    if (any(s, own)) { v += 3; bd.push({ label: 'Право собственности / Росреестр', value: 3, ...locOf(s, own) }); }
     add('realty', 'Недвижимость', v, bd); }
 
   // Транспорт
-  { const s = labels('vehicle'), bd = []; let v = 0;
-    if (any(s, ['автомобиль', 'транспортное средство', 'ПТС', 'СТС', 'марка авто', 'госномер'])) { v += 9; bd.push({ label: 'Транспортное средство', value: 9 }); }
+  { const s = mapOf('vehicle'), bd = []; let v = 0;
+    const veh = ['автомобиль', 'транспортное средство', 'ПТС', 'СТС', 'марка авто', 'госномер'];
+    if (any(s, veh)) { v += 9; bd.push({ label: 'Транспортное средство', value: 9, ...locOf(s, veh) }); }
     add('vehicle', 'Транспорт', v, bd); }
 
   // Работа и доход
-  { const s = labels('work_income'), bd = []; let v = 0;
-    if (any(s, ['место работы', 'работодатель', 'должность', 'трудоустройство', 'СФР'])) { v += 10; bd.push({ label: 'Трудоустройство / место работы', value: 10 }); }
-    else if (s.has('доход')) { v += 4; bd.push({ label: 'Указан доход', value: 4 }); }
-    if (st.incomeAmount >= 100000) { v += POSITIVE_CONFIG_V8.incomeBonus.high; bd.push({ label: `Доход ${st.incomeAmount.toLocaleString('ru-RU')} ₽`, value: POSITIVE_CONFIG_V8.incomeBonus.high }); }
-    else if (st.incomeAmount >= 50000) { v += POSITIVE_CONFIG_V8.incomeBonus.mid; bd.push({ label: `Доход ${st.incomeAmount.toLocaleString('ru-RU')} ₽`, value: POSITIVE_CONFIG_V8.incomeBonus.mid }); }
+  { const s = mapOf('work_income'), bd = []; let v = 0;
+    const work = ['место работы', 'работодатель', 'должность', 'трудоустройство', 'СФР'];
+    if (any(s, work)) { v += 10; bd.push({ label: 'Трудоустройство / место работы', value: 10, ...locOf(s, work) }); }
+    else if (s.has('доход')) { v += 4; bd.push({ label: 'Указан доход', value: 4, ...locOf(s, ['доход']) }); }
+    if (st.incomeAmount >= 100000) { v += POSITIVE_CONFIG_V8.incomeBonus.high; bd.push({ label: `Доход ${st.incomeAmount.toLocaleString('ru-RU')} ₽`, value: POSITIVE_CONFIG_V8.incomeBonus.high, ...(st.incomeLoc || {}) }); }
+    else if (st.incomeAmount >= 50000) { v += POSITIVE_CONFIG_V8.incomeBonus.mid; bd.push({ label: `Доход ${st.incomeAmount.toLocaleString('ru-RU')} ₽`, value: POSITIVE_CONFIG_V8.incomeBonus.mid, ...(st.incomeLoc || {}) }); }
     add('work_income', 'Работа и доход', v, bd); }
 
   // Банковский клиент
-  { const s = labels('bank'), bd = []; let v = 0;
-    if (any(s, ['банковский счёт/карта', 'клиент банка', 'расчётный счёт', 'номер счёта'])) { v += 8; bd.push({ label: 'Клиент банка / счёт', value: 8 }); }
-    if (any(s, ['вклад', 'депозит'])) { v += 3; bd.push({ label: 'Вклад / депозит', value: 3 }); }
+  { const s = mapOf('bank'), bd = []; let v = 0;
+    const acc = ['банковский счёт/карта', 'клиент банка', 'расчётный счёт', 'номер счёта'];
+    if (any(s, acc)) { v += 8; bd.push({ label: 'Клиент банка / счёт', value: 8, ...locOf(s, acc) }); }
+    if (any(s, ['вклад', 'депозит'])) { v += 3; bd.push({ label: 'Вклад / депозит', value: 3, ...locOf(s, ['вклад', 'депозит']) }); }
     add('bank', 'Банковский клиент', v, bd); }
 
   // Поездки
-  { const s = labels('travel'), bd = []; let v = 0;
+  { const s = mapOf('travel'), bd = []; let v = 0;
     const air = any(s, ['перелёт', 'авиабилет']);
     const rail = s.has('ж/д билет');
-    if (air || rail) { v += 5; bd.push({ label: air && rail ? 'Перелёты и ж/д' : air ? 'Перелёты' : 'Ж/д билеты', value: 5 }); }
-    if ((air && rail) || s.has('загранпаспорт')) { v += 3; bd.push({ label: s.has('загранпаспорт') ? 'Загранпаспорт' : 'Несколько видов поездок', value: 3 }); }
+    if (air || rail) { v += 5; bd.push({ label: air && rail ? 'Перелёты и ж/д' : air ? 'Перелёты' : 'Ж/д билеты', value: 5, ...locOf(s, ['перелёт', 'авиабилет', 'ж/д билет']) }); }
+    if ((air && rail) || s.has('загранпаспорт')) { v += 3; bd.push({ label: s.has('загранпаспорт') ? 'Загранпаспорт' : 'Несколько видов поездок', value: 3, ...locOf(s, ['загранпаспорт', 'ж/д билет', 'авиабилет']) }); }
     add('travel', 'Поездки', v, bd); }
 
   // Регистрация в РФ
-  { const s = labels('registration'), bd = []; let v = 0;
-    if (any(s, ['адрес регистрации', 'регистрация по месту жительства', 'прописка', 'паспорт РФ', 'гражданство РФ'])) { v += 6; bd.push({ label: 'Регистрация / гражданство РФ', value: 6 }); }
-    if (st.regBefore2014) { v += POSITIVE_CONFIG_V8.regBefore2014Bonus; bd.push({ label: `Регистрация/документы в РФ с ${st.regYear} (до 2014)`, value: POSITIVE_CONFIG_V8.regBefore2014Bonus }); }
+  { const s = mapOf('registration'), bd = []; let v = 0;
+    const reg = ['адрес регистрации', 'регистрация по месту жительства', 'прописка', 'паспорт РФ', 'гражданство РФ'];
+    if (any(s, reg)) { v += 6; bd.push({ label: 'Регистрация / гражданство РФ', value: 6, ...locOf(s, reg) }); }
+    if (st.regBefore2014) { v += POSITIVE_CONFIG_V8.regBefore2014Bonus; bd.push({ label: `Регистрация/документы в РФ с ${st.regYear} (до 2014)`, value: POSITIVE_CONFIG_V8.regBefore2014Bonus, ...(st.regLoc || {}) }); }
     add('registration', 'Регистрация в РФ', v, bd); }
 
   // Идентификация
-  { const s = labels('civic'), bd = []; let v = 0;
-    if (any(s, ['СНИЛС', 'Госуслуги', 'избиратель', 'ОМС', 'водительское удостоверение'])) { v += 4; bd.push({ label: 'Идентификация (СНИЛС/Госуслуги и т.п.)', value: 4 }); }
+  { const s = mapOf('civic'), bd = []; let v = 0;
+    const ids = ['СНИЛС', 'Госуслуги', 'избиратель', 'ОМС', 'водительское удостоверение'];
+    if (any(s, ids)) { v += 4; bd.push({ label: 'Идентификация (СНИЛС/Госуслуги и т.п.)', value: 4, ...locOf(s, ids) }); }
     add('civic', 'Идентификация', v, bd); }
 
   let totalScore = Math.max(0, Math.min(100, Math.round(components.reduce((s, c) => s + c.score, 0))));
@@ -4229,9 +4256,12 @@ function renderDetailHtml(entry) {
           <thead><tr><th>Категория</th><th>Детализация</th><th class="bd-num">Балл</th></tr></thead>
           <tbody>`;
       for (const c of [...ps.components].sort((x, y) => y.score - x.score)) {
-        const det = c.breakdown.map(b =>
-          `<div class="bd-detail-row"><span class="bd-detail-label">${escapeHtml(b.label)}</span><span class="bd-detail-value" style="color:var(--success);">+${b.value}</span></div>`
-        ).join('');
+        const det = c.breakdown.map(b => {
+          const link = b.pageNum
+            ? ` <a class="page-link-btn" data-page="${b.pageNum}" data-bbox="${b.bbox ? JSON.stringify(b.bbox).replace(/"/g, '&quot;') : ''}">стр. ${b.pageNum} →</a>`
+            : '';
+          return `<div class="bd-detail-row"><span class="bd-detail-label">${escapeHtml(b.label)}${link}</span><span class="bd-detail-value" style="color:var(--success);">+${b.value}</span></div>`;
+        }).join('');
         html += `<tr>
           <td class="bd-cat-name">${escapeHtml(c.title)}</td>
           <td class="bd-details">${det}</td>
