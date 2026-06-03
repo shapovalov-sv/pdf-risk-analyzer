@@ -1125,7 +1125,6 @@ const POSITIVE_CATEGORIES = {
       { pattern: wb('женат'), weight: 3, label: 'женат' },
       { pattern: wb('замужем'), weight: 3, label: 'замужем' },
       { pattern: wb('супруг(а|и|у|ой|ом|е|ам|ами)?'), weight: 2, label: 'супруг(а)' },
-      { pattern: wb('семейн(ое|ого)\\s+положени'), weight: 1, label: 'семейное положение' },
       { pattern: wb('загс'), weight: 2, label: 'ЗАГС' },
       { pattern: wb('бракосочетани|заключени(е|и)\\s+брака|брак\\s+зарегистрирован'), weight: 3, label: 'брак зарегистрирован' },
       { pattern: wb('дет(и|ей|ям|ьми|ях)'), weight: 2, label: 'дети' },
@@ -3811,7 +3810,7 @@ function computePositiveScoreV8(positive) {
 
   // Семья
   { const s = mapOf('family'), bd = []; let v = 0;
-    const married = ['женат', 'замужем', 'супруг(а)', 'брак зарегистрирован', 'ЗАГС', 'семейное положение'];
+    const married = ['женат', 'замужем', 'супруг(а)', 'брак зарегистрирован', 'ЗАГС'];
     const kids = ['дети', 'ребёнок', 'сын', 'дочь'];
     if (any(s, married)) { v += 12; bd.push({ label: 'В браке / семья', value: 12, ...locOf(s, married) }); }
     if (any(s, kids)) { v += 8; bd.push({ label: 'Есть дети', value: 8, ...locOf(s, kids) }); }
